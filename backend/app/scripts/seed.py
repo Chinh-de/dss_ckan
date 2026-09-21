@@ -428,7 +428,7 @@ def main():
     args = parser.parse_args()
 
     t0 = time.time()
-    logger.info("🚀 Starting CKAN Unified Database Seeder...")
+    logger.info("Starting CKAN Unified Database Seeder...")
 
     if not args.neo4j_only:
         try:
@@ -442,7 +442,7 @@ def main():
         except Exception as e:
             logger.error(f"Neo4j seeding failed: {e}")
 
-    logger.info(f"✨ All seeding operations finished in {time.time() - t0:.2f} seconds.")
+    logger.info(f"All seeding operations finished in {time.time() - t0:.2f} seconds.")
 
 
 if __name__ == "__main__":

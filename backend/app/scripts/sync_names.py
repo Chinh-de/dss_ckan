@@ -28,7 +28,7 @@ def sync_names_to_neo4j():
     """
     session.run(cypher, batch=batch)
     session.close()
-    logger.info(f"✨ Successfully synced {len(names)} human-readable names to Neo4j nodes!")
+    logger.info(f"Successfully synced {len(names)} human-readable names to Neo4j nodes!")
 
 if __name__ == "__main__":
     sync_names_to_neo4j()

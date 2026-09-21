@@ -1,7 +1,7 @@
 # DSS CKAN Movie Recommender System
 
 
-## 🏗️ Kiến Trúc Hệ Thống
+## Kiến Trúc Hệ Thống
 
 ```
                                   Client Browser
@@ -31,9 +31,9 @@
 
 ---
 
-## 🚀 Hướng Dẫn Cài Đặt & Chạy Hệ Thống
+## Hướng Dẫn Cài Đặt & Chạy Hệ Thống
 
-### 📋 Yêu Cầu Môi Trường
+### Yêu Cầu Môi Trường
 
 * **Python**: $\ge 3.11$ kèm công cụ **`uv`** (`pip install uv` hoặc `winget install astral-sh.uv`)
 * **Node.js**: $\ge 20.0$ kèm công cụ **`pnpm`** (`npm install -g pnpm`)
@@ -41,7 +41,7 @@
 
 ---
 
-### ⚙️ Thiết Lập Biến Môi Trường (.env)
+### Thiết Lập Biến Môi Trường (.env)
 
 Dự án đã chuẩn bị sẵn các tệp mẫu `.env.example` và tệp cấu hình mặc định sẵn sàng chạy:
 
@@ -68,10 +68,10 @@ docker compose up -d --build
 
 Sau khi khởi động thành công:
 
-* 🌐 **Giao diện Web mới**: [http://localhost:5173/](http://localhost:5173/)
-* 📡 **FastAPI Swagger API**: [http://localhost:8000/docs](http://localhost:8000/docs)
-* 📊 **Neo4j Browser**: [http://localhost:7474/](http://localhost:7474/) (User: `neo4j`, Pass: `neo4j_password`)
-* 💾 **PostgreSQL**: `localhost:5435` (DB: `ckan_recommendation`, User: `postgres`, Pass: `postgres_password`)
+* **Giao diện Web**: [http://localhost:5173/](http://localhost:5173/)
+* **FastAPI Swagger API**: [http://localhost:8000/docs](http://localhost:8000/docs)
+* **Neo4j Browser**: [http://localhost:7474/](http://localhost:7474/) (User: `neo4j`, Pass: `neo4j_password`)
+* **PostgreSQL**: `localhost:5435` (DB: `ckan_recommendation`, User: `postgres`, Pass: `postgres_password`)
 
 ---
 
@@ -128,7 +128,7 @@ pnpm dev
 
 ---
 
-## 🧪 Kiểm Thử Tự Động (Automated Testing)
+## Kiểm Thử Tự Động (Automated Testing)
 
 ### 1. Kiểm thử Backend (Pytest qua `uv`)
 
@@ -150,7 +150,7 @@ pnpm build
 
 ---
 
-## 📚 Danh Mục REST API Chính
+## Danh Mục REST API Chính
 
 | Phương thức | Endpoint                                 | Mô tả                                                                              |
 | :------------- | :--------------------------------------- | :----------------------------------------------------------------------------------- |
@@ -168,7 +168,7 @@ pnpm build
 
 ---
 
-## 📂 Cấu Trúc Mã Nguồn
+## Cấu Trúc Mã Nguồn
 
 ```
 dss_ckan_movie_recommender_system/
