@@ -1,0 +1,15 @@
+# Frontend specific gitignore
+node_modules/
+dist/
+.pnpm-store/
+*.tsbuildinfo
+
+.env
+.env.*
+!.env.example
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+

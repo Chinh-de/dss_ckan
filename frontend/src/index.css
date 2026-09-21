@@ -1,0 +1,72 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 240 25% 4%;
+    --foreground: 210 40% 98%;
+    --card: 240 25% 7%;
+    --card-foreground: 210 40% 98%;
+    --popover: 240 25% 7%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 38 79% 57%;
+    --primary-foreground: 240 25% 4%;
+    --secondary: 240 20% 16%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 240 20% 12%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 359 67% 54%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 240 20% 16%;
+    --input: 240 20% 16%;
+    --ring: 38 79% 57%;
+  }
+}
+
+body {
+  background-color: #090A0F;
+  color: #F1F5F9;
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  overflow-x: hidden;
+}
+
+/* Custom subtle scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #090A0F;
+}
+::-webkit-scrollbar-thumb {
+  background: #1E2333;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #E5A93C;
+}
+
+/* Glassmorphism utility */
+.glass-panel {
+  background: rgba(17, 20, 30, 0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.glass-card {
+  background: rgba(17, 20, 30, 0.85);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.glass-card:hover {
+  border-color: rgba(229, 169, 60, 0.35);
+  transform: translateY(-2px);
+  box-shadow: 0 12px 30px -10px rgba(0, 0, 0, 0.7), 0 0 20px -5px rgba(229, 169, 60, 0.15);
+}
+

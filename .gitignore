@@ -1,0 +1,100 @@
+# ==============================================================================
+# Git Ignore Configuration - CKAN Movie Recommendation Platform
+# ==============================================================================
+
+# 1. Environment and Secrets
+.env
+.env.*
+*.env
+!.env.example
+!*.env.example
+
+# 2. Python & Virtual Environments (uv / pip / poetry)
+.venv/
+venv/
+env/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+/lib/
+/lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Testing & Linting
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+.ruff_cache/
+.mypy_cache/
+
+# 3. Node.js & Frontend (pnpm / npm / vite)
+node_modules/
+frontend/node_modules/
+.pnpm-store/
+frontend/.pnpm-store/
+frontend/dist/
+dist/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# 4. Large ML Checkpoints & Intermediate Caches
+# Keep directories tracked via .gitkeep
+backend/models/*.pt
+backend/models/*.pth
+backend/models/*.bin
+backend/models/cache/*.pkl
+backend/models/cache/*.npy
+!backend/models/.gitkeep
+!backend/models/cache/.gitkeep
+
+# 5. Databases & Local Volumes
+*.sqlite
+*.sqlite3
+*.db
+postgres_data/
+neo4j_data/
+neo4j_logs/
+
+# 6. Operating System & IDE
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+[Dd]esktop.ini
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+
+.agent/
+.agents/
