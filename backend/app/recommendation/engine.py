@@ -7,7 +7,7 @@ import numpy as np
 import torch
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
+from app.core.config import settings, BACKEND_DIR
 from app.core.neo4j_client import neo4j_client
 from app.models.sql_models import Rating, Interaction, Movie
 from app.models.schemas import RecommendationItemDto
@@ -97,17 +97,30 @@ class RecommendationEngine:
             "use_cuda": use_cuda,
         }
 
-        if os.path.exists(settings.MODEL_PATH):
-            logger.info(f"Loading CKAN checkpoint from {settings.MODEL_PATH}...")
+        # Check candidate checkpoint paths
+        candidate_paths = [
+            settings.MODEL_PATH,
+            str(BACKEND_DIR / "models" / "ckan_model.pt"),
+            str(BACKEND_DIR / "models" / "ckan_movie.pt"),
+            "models/ckan_model.pt",
+            "models/ckan_movie.pt",
+        ]
+        chosen_model_path = next((p for p in candidate_paths if p and os.path.exists(p)), None)
+
+        if chosen_model_path:
+            logger.info(f"Loading CKAN checkpoint from {chosen_model_path}...")
             try:
-                checkpoint = torch.load(settings.MODEL_PATH, map_location=self.device)
+                checkpoint = torch.load(chosen_model_path, map_location=self.device)
                 saved_args = checkpoint.get("args", model_args_dict)
                 self.model_args = ModelArgs(saved_args)
                 self.n_entity = checkpoint.get("n_entity", self.n_entity)
                 self.n_relation = checkpoint.get("n_relation", self.n_relation)
                 self.model = CKAN(self.model_args, self.n_entity, self.n_relation)
                 self.model.load_state_dict(checkpoint["model_state_dict"])
-                logger.info("CKAN checkpoint loaded successfully.")
+                best_auc = checkpoint.get("best_auc")
+                best_f1 = checkpoint.get("best_f1")
+                extra_info = f" (Peak AUC: {best_auc:.4f}, F1: {best_f1:.4f})" if best_auc else ""
+                logger.info(f"CKAN checkpoint loaded successfully{extra_info}.")
             except Exception as e:
                 logger.error(f"Failed to load checkpoint: {e}. Initializing fresh CKAN model.")
                 self.model_args = ModelArgs(model_args_dict)
