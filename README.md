@@ -1,31 +1,5 @@
 # DSS CKAN Movie Recommender System
 
-Hệ thống gợi ý phim thông minh có khả năng giải thích (Explainable Movie Recommendation System) kết hợp mạng nơ-ron CKAN (Collaborative Knowledge-aware Attentive Network), cơ sở dữ liệu đồ thị Neo4j, cơ sở dữ liệu quan hệ PostgreSQL, cùng giao diện Cinematic Luxury React thế hệ mới.
-
----
-
-## 🌟 Tính Năng Nổi Bật (Key Breakthroughs)
-
-1. **Backend FastAPI Hợp Nhất (Quản lý bằng `uv`)**:
-   - Thay thế toàn bộ kiến trúc 2 tầng (NestJS + Python ML riêng rẽ) thành MỘT dịch vụ FastAPI duy nhất xử lý trực tiếp REST API, kết nối PostgreSQL (SQLAlchemy), Neo4j driver và mô hình học sâu PyTorch CKAN.
-   - Loại bỏ hoàn toàn độ trễ mạng HTTP nội bộ.
-
-2. **Xử Lý Cold-Start Đột Phá (Hoàn toàn KHÔNG cần Finetune mô hình)**:
-   - **Bản chất toán học**: Mô hình CKAN không lưu embedding tĩnh của user trong weights, vector người dùng $e_u$ được tính động từ Attention của các phim đã like.
-   - **Sinh động `user_triple_set` trong $\approx 3\text{ ms}$**: Khi có người dùng mới hoặc người dùng like phim mới, hệ thống chỉ tra cứu đồ thị trên RAM để đóng gói tensor đưa thẳng vào CKAN, cho phép gợi ý cá nhân hóa ngay lập tức mà không cần train lại 1 epoch nào.
-   - **Onboarding thông minh**: Cho phép người dùng mới chọn 3-5 thể loại và phim kinh điển khởi đầu để xóa sạch cold-start ngay từ giây đầu tiên.
-
-3. **Cơ Chế Dislike Chặn Cứng (Blacklist 100%)**:
-   - Khi người dùng đánh giá $< 3.5$ sao hoặc bấm Dislike, phim sẽ bị loại bỏ 100% khỏi danh sách gợi ý và không bao giờ xuất hiện lại.
-   - Đồng bộ xóa cạnh `[:LIKED]` trên Neo4j.
-
-4. **Frontend Chuẩn 3 Design Skills (Quản lý bằng `pnpm`)**:
-   - Tuân thủ nghiêm ngặt: [uiuxpromax](https://github.com/Chinh-de/dss_ckan/blob/main/.agent/skills/uiuxpromax/SKILL.md), [taste-skill](https://github.com/Chinh-de/dss_ckan/blob/main/.agent/skills/taste-skill/SKILL.md), [claude-design](https://github.com/Chinh-de/dss_ckan/blob/main/.agent/skills/claude-design/SKILL.md).
-   - Tone màu **Cinematic Luxury Dark Mode** (`#090A0F`, `#0F121A`, hổ phách `#E5A93C`, đỏ đạo diễn `#D9383A`, viền hairline `ring-1 ring-white/10`). Triệt tiêu hoàn toàn gradient tím/hồng rập khuôn ("Anti-AI-Slop").
-   - **Explainability Modal 4 tầng**: Tóm tắt ngôn ngữ tự nhiên, Breadcrumb đồ thị tri thức, Thanh phần trăm Attribution, và Phân tích phản thực tế.
-   - **Knowledge Graph Visualizer**: Khám phá mạng lưới liên kết thực thể (User, Liked, Recommended, Director, Actor, Genre) sống động bằng `@xyflow/react`.
-
----
 
 ## 🏗️ Kiến Trúc Hệ Thống
 
@@ -60,6 +34,7 @@ Hệ thống gợi ý phim thông minh có khả năng giải thích (Explainabl
 ## 🚀 Hướng Dẫn Cài Đặt & Chạy Hệ Thống
 
 ### 📋 Yêu Cầu Môi Trường
+
 * **Python**: $\ge 3.11$ kèm công cụ **`uv`** (`pip install uv` hoặc `winget install astral-sh.uv`)
 * **Node.js**: $\ge 20.0$ kèm công cụ **`pnpm`** (`npm install -g pnpm`)
 * **Docker & Docker Compose** (để chạy PostgreSQL và Neo4j)
@@ -69,11 +44,13 @@ Hệ thống gợi ý phim thông minh có khả năng giải thích (Explainabl
 ### ⚙️ Thiết Lập Biến Môi Trường (.env)
 
 Dự án đã chuẩn bị sẵn các tệp mẫu `.env.example` và tệp cấu hình mặc định sẵn sàng chạy:
+
 * **Root**: `.env.example` và `.env` (chứa cổng cấu hình cho docker-compose).
 * **Backend**: `backend/.env.example` và `backend/.env` (cấu hình DB, Neo4j, JWT, đường dẫn Data/Models).
 * **Frontend**: `frontend/.env.example` và `frontend/.env` (cấu hình API endpoint).
 
 Khi cần thay đổi mật khẩu hoặc cổng, chỉ cần copy từ `.env.example` sang `.env`:
+
 ```bash
 # Ở thư mục gốc hoặc trong backend/frontend:
 cp .env.example .env
@@ -90,6 +67,7 @@ docker compose up -d --build
 ```
 
 Sau khi khởi động thành công:
+
 * 🌐 **Giao diện Web mới**: [http://localhost:5173/](http://localhost:5173/)
 * 📡 **FastAPI Swagger API**: [http://localhost:8000/docs](http://localhost:8000/docs)
 * 📊 **Neo4j Browser**: [http://localhost:7474/](http://localhost:7474/) (User: `neo4j`, Pass: `neo4j_password`)
@@ -100,12 +78,15 @@ Sau khi khởi động thành công:
 ### Cách 2: Khởi Chạy Từng Phần Cho Phát Triển (Local Development)
 
 #### Bước 1: Khởi động CSDL PostgreSQL & Neo4j
+
 ```bash
 docker compose up -d postgres neo4j
 ```
 
 #### Bước 2: Nạp Dữ Liệu Khởi Tạo (Seed PostgreSQL & Neo4j)
+
 Chạy lệnh seeder hợp nhất để nạp **toàn bộ 16,954 phim**, **tất cả 2,500 người dùng benchmark**, **238,442 tương tác LIKE/DISLIKE**, cùng toàn bộ liên kết Đồ thị Tri thức:
+
 ```bash
 cd backend
 
@@ -115,19 +96,24 @@ uv run python seed.py
 # Hoặc chỉ nạp nhanh 100 users nếu muốn test nhẹ:
 uv run python seed.py --max-users 100
 ```
+
 *(Tùy chọn: Thêm cờ `--clean` để xóa sạch làm mới, hoặc `--postgres-only` / `--neo4j-only` khi cần).*
 
 #### Bước 3: Khởi động Backend với `uv`
+
 ```bash
 # Ở thư mục backend:
 uv sync
 uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
+
 * Kiểm tra API Health: [http://localhost:8000/health](http://localhost:8000/health)
 * Tài liệu Swagger: [http://localhost:8000/docs](http://localhost:8000/docs)
 
 #### Bước 4: Khởi động Frontend với `pnpm`
+
 Mở một terminal mới:
+
 ```bash
 cd frontend
 
@@ -137,6 +123,7 @@ pnpm install
 # Khởi chạy Vite dev server
 pnpm dev
 ```
+
 * Truy cập Web: [http://localhost:5173/](http://localhost:5173/)
 
 ---
@@ -144,36 +131,40 @@ pnpm dev
 ## 🧪 Kiểm Thử Tự Động (Automated Testing)
 
 ### 1. Kiểm thử Backend (Pytest qua `uv`)
+
 ```bash
 cd backend
 uv run --extra dev pytest tests/
 ```
+
 * Kết quả: Xác nhận hàm sinh động `user_triple_set` chạy thành công trong $< 5\text{ ms}$.
 
 ### 2. Kiểm thử Build Frontend (TypeScript & CSS qua `pnpm`)
+
 ```bash
 cd frontend
 pnpm build
 ```
+
 * Kết quả: Biên dịch toàn bộ production bundle chỉ trong $\approx 4.9\text{s}$ với 0 lỗi TypeScript, 0 lỗi CSS.
 
 ---
 
 ## 📚 Danh Mục REST API Chính
 
-| Phương thức | Endpoint | Mô tả |
-| :--- | :--- | :--- |
-| `POST` | `/api/v1/auth/register` | Đăng ký tài khoản người dùng |
-| `POST` | `/api/v1/auth/login` | Đăng nhập và nhận JWT token |
-| `POST` | `/api/v1/auth/onboarding` | Khởi tạo gu thể loại và phim khởi đầu cho user mới |
-| `GET` | `/api/v1/movies` | Danh sách phim (phân trang, tìm kiếm theo tên, lọc thể loại) |
-| `GET` | `/api/v1/movies/{id}` | Chi tiết phim và điểm đánh giá trung bình |
-| `GET` | `/api/v1/movies/{id}/related` | Lấy danh sách phim tương tự từ đồ thị Neo4j |
-| `POST` | `/api/v1/ratings` | Đánh giá phim 1-5 sao, gắn nhãn LIKE/DISLIKE, sync Neo4j tức thì |
-| `GET` | `/api/v1/recommendations` | **Gợi ý Top-K cá nhân hóa** (hỗ trợ user mới, tự động lọc dislike) |
-| `GET` | `/api/v1/explainability/{movieId}` | Trích xuất đường dẫn giải thích đa tầng Cypher |
-| `GET` | `/api/v1/graph/subgraph/{movieId}` | Subgraph 1-hop quanh phim phục vụ biểu đồ |
-| `GET` | `/api/v1/graph/user-subgraph/{userId}` | Subgraph kết nối User đến các phim gợi ý qua thực thể |
+| Phương thức | Endpoint                                 | Mô tả                                                                              |
+| :------------- | :--------------------------------------- | :----------------------------------------------------------------------------------- |
+| `POST`       | `/api/v1/auth/register`                | Đăng ký tài khoản người dùng                                                 |
+| `POST`       | `/api/v1/auth/login`                   | Đăng nhập và nhận JWT token                                                     |
+| `POST`       | `/api/v1/auth/onboarding`              | Khởi tạo gu thể loại và phim khởi đầu cho user mới                          |
+| `GET`        | `/api/v1/movies`                       | Danh sách phim (phân trang, tìm kiếm theo tên, lọc thể loại)                 |
+| `GET`        | `/api/v1/movies/{id}`                  | Chi tiết phim và điểm đánh giá trung bình                                    |
+| `GET`        | `/api/v1/movies/{id}/related`          | Lấy danh sách phim tương tự từ đồ thị Neo4j                                 |
+| `POST`       | `/api/v1/ratings`                      | Đánh giá phim 1-5 sao, gắn nhãn LIKE/DISLIKE, sync Neo4j tức thì              |
+| `GET`        | `/api/v1/recommendations`              | **Gợi ý Top-K cá nhân hóa** (hỗ trợ user mới, tự động lọc dislike) |
+| `GET`        | `/api/v1/explainability/{movieId}`     | Trích xuất đường dẫn giải thích đa tầng Cypher                             |
+| `GET`        | `/api/v1/graph/subgraph/{movieId}`     | Subgraph 1-hop quanh phim phục vụ biểu đồ                                       |
+| `GET`        | `/api/v1/graph/user-subgraph/{userId}` | Subgraph kết nối User đến các phim gợi ý qua thực thể                       |
 
 ---
 
@@ -217,4 +208,3 @@ dss_ckan_movie_recommender_system/
 ├── .gitignore                # Bỏ qua venv, node_modules, weights lớn
 └── README.md                 # Tài liệu hướng dẫn chi tiết
 ```
-
