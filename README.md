@@ -1,6 +1,5 @@
 # DSS CKAN Movie Recommender System
 
-
 ## Kiến Trúc Hệ Thống
 
 ```
