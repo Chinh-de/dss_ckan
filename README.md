@@ -1,18 +1,18 @@
-# DSS CKAN Movie Recommender System (v2.0)
+# DSS CKAN Movie Recommender System
 
-Hệ thống gợi ý phim thông minh có khả năng giải thích (Explainable Movie Recommendation System) kết hợp mạng nơ-ron **CKAN (Collaborative Knowledge-aware Attentive Network)**, cơ sở dữ liệu đồ thị **Neo4j**, cơ sở dữ liệu quan hệ **PostgreSQL**, cùng giao diện **Cinematic Luxury React** thế hệ mới.
+Hệ thống gợi ý phim thông minh có khả năng giải thích (Explainable Movie Recommendation System) kết hợp mạng nơ-ron CKAN (Collaborative Knowledge-aware Attentive Network), cơ sở dữ liệu đồ thị Neo4j, cơ sở dữ liệu quan hệ PostgreSQL, cùng giao diện Cinematic Luxury React thế hệ mới.
 
 ---
 
 ## 🌟 Tính Năng Nổi Bật (Key Breakthroughs)
 
 1. **Backend FastAPI Hợp Nhất (Quản lý bằng `uv`)**:
-   - Thay thế toàn bộ kiến trúc 2 tầng (NestJS + Python ML riêng rẽ) thành **MỘT dịch vụ FastAPI duy nhất** xử lý trực tiếp REST API, kết nối PostgreSQL (`SQLAlchemy`), Neo4j driver và mô hình học sâu PyTorch CKAN.
+   - Thay thế toàn bộ kiến trúc 2 tầng (NestJS + Python ML riêng rẽ) thành MỘT dịch vụ FastAPI duy nhất xử lý trực tiếp REST API, kết nối PostgreSQL (SQLAlchemy), Neo4j driver và mô hình học sâu PyTorch CKAN.
    - Loại bỏ hoàn toàn độ trễ mạng HTTP nội bộ.
 
 2. **Xử Lý Cold-Start Đột Phá (Hoàn toàn KHÔNG cần Finetune mô hình)**:
    - **Bản chất toán học**: Mô hình CKAN không lưu embedding tĩnh của user trong weights, vector người dùng $e_u$ được tính động từ Attention của các phim đã like.
-   - **Sinh động `user_triple_set` trong $\approx 3\text{ ms}$**: Khi có người dùng mới hoặc người dùng like phim mới, hệ thống chỉ tra cứu đồ thị trên RAM để đóng gói tensor đưa thẳng vào CKAN, cho phép gợi ý cá nhân hóa ngay lập tức mà **không cần train lại 1 epoch nào**.
+   - **Sinh động `user_triple_set` trong $\approx 3\text{ ms}$**: Khi có người dùng mới hoặc người dùng like phim mới, hệ thống chỉ tra cứu đồ thị trên RAM để đóng gói tensor đưa thẳng vào CKAN, cho phép gợi ý cá nhân hóa ngay lập tức mà không cần train lại 1 epoch nào.
    - **Onboarding thông minh**: Cho phép người dùng mới chọn 3-5 thể loại và phim kinh điển khởi đầu để xóa sạch cold-start ngay từ giây đầu tiên.
 
 3. **Cơ Chế Dislike Chặn Cứng (Blacklist 100%)**:
@@ -20,7 +20,7 @@ Hệ thống gợi ý phim thông minh có khả năng giải thích (Explainabl
    - Đồng bộ xóa cạnh `[:LIKED]` trên Neo4j.
 
 4. **Frontend Chuẩn 3 Design Skills (Quản lý bằng `pnpm`)**:
-   - Tuân thủ nghiêm ngặt: [`uiuxpromax`](.agent/skills/uiuxpromax/SKILL.md), [`taste-skill`](.agent/skills/taste-skill/SKILL.md), [`claude-design`](.agent/skills/claude-design/SKILL.md).
+   - Tuân thủ nghiêm ngặt: [uiuxpromax](https://github.com/Chinh-de/dss_ckan/blob/main/.agent/skills/uiuxpromax/SKILL.md), [taste-skill](https://github.com/Chinh-de/dss_ckan/blob/main/.agent/skills/taste-skill/SKILL.md), [claude-design](https://github.com/Chinh-de/dss_ckan/blob/main/.agent/skills/claude-design/SKILL.md).
    - Tone màu **Cinematic Luxury Dark Mode** (`#090A0F`, `#0F121A`, hổ phách `#E5A93C`, đỏ đạo diễn `#D9383A`, viền hairline `ring-1 ring-white/10`). Triệt tiêu hoàn toàn gradient tím/hồng rập khuôn ("Anti-AI-Slop").
    - **Explainability Modal 4 tầng**: Tóm tắt ngôn ngữ tự nhiên, Breadcrumb đồ thị tri thức, Thanh phần trăm Attribution, và Phân tích phản thực tế.
    - **Knowledge Graph Visualizer**: Khám phá mạng lưới liên kết thực thể (User, Liked, Recommended, Director, Actor, Genre) sống động bằng `@xyflow/react`.
