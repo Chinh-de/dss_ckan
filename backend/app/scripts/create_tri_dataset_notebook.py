@@ -35,7 +35,7 @@ Notebook thực hiện:
    - CTR Prediction: AUC, F1, Accuracy.
    - Top-K Ranking: Recall@K, NDCG@K, Precision@K ($K \in \{5, 10, 20\}$).
    - Sparsity Test: Thử nghiệm giảm xuống 10% lượng tương tác ban đầu.
-5. **Trực quan hóa**: Vẽ biểu đồ kết quả trực tiếp trong notebook để tiện copy.
+5. **Đóng gói Model**: Tự động lưu 3 model và các file phụ trợ vào thư mục `./saved_models/` để mở rộng Backend / Frontend dùng cả 3 dataset.
 """)
 
 # ============================================================
@@ -57,6 +57,9 @@ add_code(r"""!pip install -q --upgrade scikit-learn scipy matplotlib seaborn pan
 
 import os
 import time
+import json
+import pickle
+import shutil
 import random
 import zipfile
 import urllib.request
@@ -83,6 +86,9 @@ if torch.cuda.is_available():
 plt.rcParams['font.sans-serif'] = 'DejaVu Sans'
 plt.rcParams['axes.edgecolor'] = '#D1D5DB'
 plt.rcParams['axes.linewidth'] = 1.0
+
+# Tạo thư mục lưu trữ model
+os.makedirs("./saved_models", exist_ok=True)
 """)
 
 # ============================================================
@@ -935,7 +941,7 @@ def run_comprehensive_benchmark(ds_name):
     mf_topk = topk_evaluator.evaluate_model(lambda u: mf.score_all_items(u, device), eval_users, train_pos_dict, test_pos_dict, n_item)
     print(f"  [3/4] MatrixFactorization: AUC={mf_auc:.4f} | F1={mf_f1:.4f} | Recall@10={mf_topk['Recall@10']:.4f} | NDCG@10={mf_topk['NDCG@10']:.4f}")
     
-    # 4. CKAN
+    # 4. CKAN (Huấn luyện và lưu model)
     sampler = KnowledgeRippleSampler(kg_np, n_layer=cfg["n_layer"], itss=cfg["itss"], utss=cfg["utss"])
     item_triple_set = sampler.build_item_ripple_set(n_item)
     user_triple_set = sampler.build_user_ripple_set(train_pos_dict)
@@ -948,6 +954,7 @@ def run_comprehensive_benchmark(ds_name):
         
     ckan_auc, ckan_f1, _ = trainer.evaluate(test_data, user_triple_set, item_triple_set, cfg["n_layer"], batch_size=bs)
     
+    # Tính ma trận item embeddings trên GPU
     all_item_matrix = []
     chunk_size = 2048
     for ch_s in range(0, n_item, chunk_size):
@@ -969,6 +976,42 @@ def run_comprehensive_benchmark(ds_name):
             
     ckan_topk = topk_evaluator.evaluate_model(ckan_score_fn, eval_users, train_pos_dict, test_pos_dict, n_item)
     print(f"  [4/4] CKAN              : AUC={ckan_auc:.4f} | F1={ckan_f1:.4f} | Recall@10={ckan_topk['Recall@10']:.4f} | NDCG@10={ckan_topk['NDCG@10']:.4f}")
+
+    # --- TỰ ĐỘNG LƯU MODEL VÀ TẤT CẢ ARTIFACTS CHO BACKEND / FRONTEND ---
+    save_dir = f"./saved_models/{ds_name}"
+    os.makedirs(save_dir, exist_ok=True)
+    
+    # 1. Trọng số PyTorch
+    torch.save(ckan.state_dict(), os.path.join(save_dir, "ckan_model.pt"))
+    # 2. Ma trận Item Embeddings
+    np.save(os.path.join(save_dir, "item_embeddings.npy"), all_item_matrix.cpu().numpy())
+    # 3. File cấu hình kiến trúc
+    model_config = {
+        "dataset": ds_name,
+        "n_user": int(n_user),
+        "n_item": int(n_item),
+        "n_entity": int(n_entity),
+        "n_relation": int(n_relation),
+        "dim": int(cfg["dim"]),
+        "n_layer": int(cfg["n_layer"]),
+        "itss": int(cfg["itss"]),
+        "utss": int(cfg["utss"]),
+        "agg": str(cfg["agg"])
+    }
+    with open(os.path.join(save_dir, "config.json"), "w", encoding="utf-8") as f:
+        json.dump(model_config, f, indent=2)
+    # 4. Ripple set của item
+    with open(os.path.join(save_dir, "item_triple_set.pkl"), "wb") as f:
+        pickle.dump(dict(item_triple_set), f)
+    # 5. Lịch sử của user
+    with open(os.path.join(save_dir, "user_history.pkl"), "wb") as f:
+        pickle.dump(dict(train_pos_dict), f)
+    # 6. Copy file mapping index sang entity
+    map_file = f"./data/{ds_name}/item_index2entity_id.txt"
+    if os.path.exists(map_file):
+        shutil.copy(map_file, os.path.join(save_dir, "item_index2entity_id.txt"))
+        
+    print(f"  -> Đã lưu model và artifacts vào: {save_dir}")
     
     # 5. Sparsity Test (10% Data)
     sub_tr = train_data[:int(len(train_data) * 0.1)]
@@ -1104,6 +1147,78 @@ Từ kết quả đo đạc thực tế:
   - Dữ liệu thưa hoặc gặp bài toán cold-start.
   - Cần gợi ý các item ngách ở vùng long-tail.
   - Cần giải thích lý do gợi ý dựa trên đường đi trên đồ thị tri thức.
+""")
+
+# ============================================================
+# PHẦN E: ĐÓNG GÓI MODEL VÀ CODE MẪU CHO BACKEND (3 DATASETS)
+# ============================================================
+add_md(r"""## PHẦN E: ĐÓNG GÓI MODEL VÀ HƯỚNG DẪN TÍCH HỢP BACKEND / FRONTEND (3 DATASETS)
+""")
+
+add_code(r"""# ============================================================
+# KIỂM TRA MODEL ĐÃ LƯU & NÉN THÀNH FILE ZIP
+# ============================================================
+print("Danh sách model và phụ kiện đã lưu trong ./saved_models/:")
+for ds in active_datasets:
+    path = f"./saved_models/{ds}"
+    if os.path.exists(path):
+        files = os.listdir(path)
+        print(f"  • {ds.upper()}: {len(files)} files -> {', '.join(files)}")
+
+# Nén thư mục saved_models thành file zip để download
+!zip -q -r saved_models_ckan.zip saved_models/
+if os.path.exists("saved_models_ckan.zip"):
+    size_mb = os.path.getsize("saved_models_ckan.zip") / (1024 * 1024)
+    print(f"\nĐã đóng gói thành công: saved_models_ckan.zip ({size_mb:.2f} MB)")
+    print("Bạn có thể tải file này về để đưa vào thư mục Backend FastAPI / React.")
+""")
+
+add_md(r"""### Code mẫu Backend (FastAPI) để nạp và chuyển đổi giữa 3 bộ Dataset:
+
+```python
+import json
+import pickle
+import torch
+import numpy as np
+from app.recommendation.ckan_model import CKAN
+
+class MultiDatasetCKANEngine:
+    def __init__(self, base_dir="./saved_models"):
+        self.base_dir = base_dir
+        self.engines = {}
+
+    def load_dataset(self, dataset_name="movie", device="cpu"):
+        if dataset_name in self.engines:
+            return self.engines[dataset_name]
+            
+        ds_dir = f"{self.base_dir}/{dataset_name}"
+        with open(f"{ds_dir}/config.json") as f:
+            cfg = json.load(f)
+            
+        # Khởi tạo model và load trọng số
+        model = CKAN(cfg["n_entity"], cfg["n_relation"], dim=cfg["dim"], n_layer=cfg["n_layer"], agg=cfg["agg"]).to(device)
+        model.load_state_dict(torch.load(f"{ds_dir}/ckan_model.pt", map_location=device))
+        model.eval()
+        
+        # Load ma trận item embeddings để nhân ma trận Top-K <5ms
+        item_matrix = np.load(f"{ds_dir}/item_embeddings.npy")
+        
+        with open(f"{ds_dir}/user_history.pkl", "rb") as f:
+            user_hist = pickle.load(f)
+            
+        self.engines[dataset_name] = {
+            "model": model,
+            "item_matrix": item_matrix,
+            "user_hist": user_hist,
+            "config": cfg
+        }
+        return self.engines[dataset_name]
+
+    def recommend(self, dataset_name, user_id, k=10):
+        engine = self.load_dataset(dataset_name)
+        # Tính toán gợi ý Top-K tương ứng cho dataset_name
+        # ...
+```
 """)
 
 out_path = os.path.abspath("notebooks/CKAN_Tri_Dataset_Benchmark_Colab.ipynb")
