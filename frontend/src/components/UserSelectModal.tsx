@@ -6,22 +6,29 @@ import { api } from "../services/api";
 interface UserSelectModalProps {
   isOpen: boolean;
   onClose: () => void;
+  domain?: string;
   currentUserId: number;
   onSelectUser: (userId: number) => void;
   onUserCreated?: (newUserId: number) => void;
 }
 
-// Curated showcase users with diverse profiles
-const SHOWCASE_USER_IDS = [1, 2, 10, 13, 39, 375, 551, 1665, 2244, 2431];
+// Curated showcase users with diverse profiles per domain
+const DOMAIN_SHOWCASE_IDS: Record<string, number[]> = {
+  movie: [1, 375, 551, 1665, 2244],
+  book: [790, 6486, 10029, 12762, 1],
+  music: [774, 79, 238, 386, 1],
+};
 
 export const UserSelectModal: React.FC<UserSelectModalProps> = ({
   isOpen,
   onClose,
+  domain = "movie",
   currentUserId,
   onSelectUser,
   onUserCreated,
 }) => {
   const [searchQuery, setSearchQuery] = useState("");
+  const [customIdInput, setCustomIdInput] = useState("");
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(false);
   const [filterMode, setFilterMode] = useState<"showcase" | "all">("showcase");
@@ -42,9 +49,18 @@ export const UserSelectModal: React.FC<UserSelectModalProps> = ({
           const res = await api.getUsers(1, 25, searchQuery.trim());
           setUsers(res.users || []);
         } else if (filterMode === "showcase") {
-          // Fetch showcase active users
-          const promises = SHOWCASE_USER_IDS.map((uid) =>
-            api.getUserProfile(uid).catch(() => null)
+          // Fetch showcase active users for the current domain
+          const showcaseIds = DOMAIN_SHOWCASE_IDS[domain] || DOMAIN_SHOWCASE_IDS.movie;
+          const promises = showcaseIds.map((uid) =>
+            api.getUserProfile(uid).catch(() => ({
+              id: uid,
+              name: `User #${uid}`,
+              email: `user${uid}@example.com`,
+              totalRatings: 10,
+              totalLikes: 8,
+              totalDislikes: 2,
+              topGenres: [domain.toUpperCase()]
+            }))
           );
           const results = await Promise.all(promises);
           setUsers(results.filter((u): u is UserProfile => u !== null));

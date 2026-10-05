@@ -1,0 +1,30 @@
+{
+  "index2rel": {
+    "0": "book.author.works_written",
+    "1": "book.written_work.author",
+    "2": "book.written_work.date_of_first_publication",
+    "3": "book.book.genre",
+    "4": "comic_books.publisher.comic_book_series_published",
+    "5": "book.written_work.literary_series",
+    "6": "book.literary_series.works_in_this_series",
+    "7": "comic_books.series.publisher",
+    "8": "book.author.series_written_or_contributed_to",
+    "9": "book.literary_series.author",
+    "10": "book.written_work.subject",
+    "11": "book.written_work.previous_in_series",
+    "12": "book.online_edition.text",
+    "13": "book.written_work.date_written",
+    "14": "book.literary_series.number_of_volumes",
+    "15": "book.online_edition.epub",
+    "16": "book.illustrator.book",
+    "17": "book.written_work.editor",
+    "18": "book.online_edition.pdf",
+    "19": "book.author.works_edited",
+    "20": "book.book.character",
+    "21": "book.written_work.translation",
+    "22": "book.online_edition.kindle",
+    "23": "book.character.appears_in_book",
+    "24": "book.book.interior_illustrations_by"
+  },
+  "n_relation": 25
+}

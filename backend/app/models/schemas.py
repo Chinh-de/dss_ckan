@@ -54,20 +54,91 @@ class RatingResponseDto(BaseModel):
 
 # Recommendation schemas
 class RecommendationItemDto(BaseModel):
-    movieId: int
+    id: int
+    movieId: Optional[int] = None
     movieLensId: Optional[int] = None
+    domain: str = "movie"
     title: str
+    subtitle: Optional[str] = None
+    secondaryInfo: Optional[str] = None
     releaseYear: Optional[int] = None
     genres: List[str] = Field(default_factory=list)
     posterUrl: Optional[str] = None
     score: float
     totalRatings: Optional[int] = 0
     reasons: List[str] = Field(default_factory=list)
+    metadata: Optional[Dict[str, Any]] = None
 
 class RecommendationResponseDto(BaseModel):
     userId: int
+    domain: str = "movie"
     total: int
     recommendations: List[RecommendationItemDto]
+
+class RecommendationFeedbackDto(BaseModel):
+    domain: str = "movie"
+    userId: int
+    itemId: int
+    action: str = Field(..., pattern="^(LIKE|DISLIKE)$")
+
+# Domain schemas
+class DomainInfoDto(BaseModel):
+    id: str
+    name: str
+    vietnameseName: str
+    itemTerm: str
+    description: str
+    itemsCount: int
+    usersCount: int
+    triplesCount: int
+    relationsCount: int
+    sampleUsers: List[int]
+    accentColor: str
+
+class DomainListResponseDto(BaseModel):
+    domains: List[DomainInfoDto]
+
+# Benchmark & Cold-Start schemas
+class ColdStartMetricDto(BaseModel):
+    interactions: int
+    cf_auc: float
+    cf_f1: float
+    cf_recall10: float
+    cf_ndcg10: float
+    ckan_auc: float
+    ckan_f1: float
+    ckan_recall10: float
+    ckan_ndcg10: float
+    delta_auc_pct: float
+    delta_recall_pct: float
+
+class ColdStartSimulationResponseDto(BaseModel):
+    domain: str
+    interactions: int
+    description: str
+    currentMetrics: ColdStartMetricDto
+    trajectory: List[ColdStartMetricDto]
+    cfRecommendations: List[RecommendationItemDto]
+    ckanRecommendations: List[RecommendationItemDto]
+    explanation: str
+
+# Item Explore schemas
+class ItemDto(BaseModel):
+    id: int
+    domain: str
+    title: str
+    subtitle: Optional[str] = None
+    category: Optional[str] = None
+    posterUrl: Optional[str] = None
+    releaseYear: Optional[int] = None
+    details: Optional[Dict[str, Any]] = None
+
+class ItemListResponseDto(BaseModel):
+    domain: str
+    total: int
+    page: int
+    limit: int
+    data: List[ItemDto]
 
 # Graph schemas
 class GraphNodeDto(BaseModel):
@@ -99,6 +170,7 @@ class ExplanationPathDto(BaseModel):
 class ExplanationResponseDto(BaseModel):
     userId: int
     movieId: int
+    domain: str = "movie"
     score: float
     confidence: str
     executiveSummary: str
@@ -142,4 +214,5 @@ class UserHistoryResponse(BaseModel):
     page: int
     limit: int
     items: List[UserHistoryItemDto]
+
 

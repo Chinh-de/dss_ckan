@@ -20,16 +20,22 @@ import {
   Play,
   Pause,
 } from "lucide-react";
-import { SubgraphData } from "../types";
+import { SubgraphData, DomainType } from "../types";
 import { api } from "../services/api";
 
 interface KnowledgeGraphViewProps {
   userId: number;
+  domain?: DomainType;
+  accentColor?: string;
 }
 
 type FilterType = "ALL" | "DIRECTOR" | "GENRE" | "ACTOR";
 
-export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({ userId }) => {
+export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({
+  userId,
+  domain = "movie",
+  accentColor = "#f59e0b",
+}) => {
   const [data, setData] = useState<SubgraphData | null>(null);
   const [loading, setLoading] = useState(false);
   const [filterType, setFilterType] = useState<FilterType>("ALL");
@@ -74,8 +80,27 @@ export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({ userId }
   const fetchUserGraph = async () => {
     try {
       setLoading(true);
-      const res = await api.getUserSubgraph(userId, 8);
-      setData(res);
+      if (domain === "movie") {
+        try {
+          const res = await api.getUserSubgraph(userId, 8);
+          if (res && res.nodes && res.nodes.length > 0) {
+            setData(res);
+            return;
+          }
+        } catch (e) {
+          // fallback to explainItem
+        }
+      }
+      // For book, music, or if neo4j movie graph empty, get top rec and explain
+      const recs = await api.getRecommendations(domain, userId, 3);
+      if (recs && recs.recommendations && recs.recommendations.length > 0) {
+        const topId = recs.recommendations[0].id ?? recs.recommendations[0].movieId;
+        const exp = await api.explainItem(topId, domain, userId);
+        if (exp && exp.subgraph) {
+          setData(exp.subgraph);
+          return;
+        }
+      }
     } catch (err: any) {
       console.error("Error fetching user subgraph:", err);
     } finally {
@@ -85,7 +110,7 @@ export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({ userId }
 
   useEffect(() => {
     fetchUserGraph();
-  }, [userId]);
+  }, [userId, domain]);
 
   // Transform subgraph data for Force Graph with collision physics & filtering
   const graphData = useMemo(() => {

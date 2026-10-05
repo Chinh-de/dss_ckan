@@ -15,11 +15,12 @@ import {
   Compass,
 } from "lucide-react";
 import ForceGraph2D from "react-force-graph-2d";
-import { ExplanationResponse } from "../types";
+import { ExplanationResponse, DomainType } from "../types";
 import { api } from "../services/api";
 
 interface ExplainModalProps {
   movieId: number | null;
+  domain?: DomainType;
   userId: number;
   onClose: () => void;
   onOpenFullGraph?: () => void;
@@ -27,6 +28,7 @@ interface ExplainModalProps {
 
 export const ExplainModal: React.FC<ExplainModalProps> = ({
   movieId,
+  domain = "movie",
   userId,
   onClose,
   onOpenFullGraph,
@@ -45,14 +47,14 @@ export const ExplainModal: React.FC<ExplainModalProps> = ({
   useEffect(() => {
     if (movieId !== null) {
       setLoading(true);
-      api.explainMovie(movieId, userId)
+      api.explainItem(movieId, domain, userId)
         .then(setData)
         .catch((err) => console.error("Failed to fetch explanation:", err))
         .finally(() => setLoading(false));
     } else {
       setData(null);
     }
-  }, [movieId, userId]);
+  }, [movieId, domain, userId]);
 
   // Escape key exits fullscreen
   useEffect(() => {

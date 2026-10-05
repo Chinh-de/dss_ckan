@@ -1,3 +1,23 @@
+export type DomainType = "movie" | "book" | "music";
+
+export interface DomainInfo {
+  id: DomainType;
+  name: string;
+  vietnameseName: string;
+  itemTerm: string;
+  description: string;
+  itemsCount: number;
+  usersCount: number;
+  triplesCount: number;
+  relationsCount: number;
+  sampleUsers: number[];
+  accentColor: string;
+}
+
+export interface DomainListResponse {
+  domains: DomainInfo[];
+}
+
 export interface Movie {
   id: number;
   movieLensId?: number;
@@ -12,15 +32,29 @@ export interface Movie {
 }
 
 export interface RecommendationItem {
-  movieId: number;
-  movieLensId?: number;
+  id: number;
+  domain: DomainType;
   title: string;
-  releaseYear?: number;
-  genres: string[];
+  subtitle?: string;
+  secondaryInfo?: string;
   posterUrl?: string | null;
   score: number;
   totalRatings?: number;
   reasons: string[];
+  metadata?: Record<string, any>;
+  
+  // Backward compatibility fields
+  movieId?: number;
+  movieLensId?: number;
+  genres?: string[];
+  releaseYear?: number;
+}
+
+export interface RecommendationResponse {
+  userId: number;
+  domain: DomainType;
+  total: number;
+  recommendations: RecommendationItem[];
 }
 
 export interface ExplanationPath {
@@ -35,6 +69,7 @@ export interface ExplanationPath {
 export interface ExplanationResponse {
   userId: number;
   movieId: number;
+  domain?: DomainType;
   score: number;
   confidence: string;
   executiveSummary: string;
@@ -62,6 +97,52 @@ export interface GraphEdge {
 export interface SubgraphData {
   nodes: GraphNode[];
   edges: GraphEdge[];
+}
+
+// Cold-Start & Sparsity Benchmark Simulation
+export interface ColdStartMetrics {
+  interactions: number;
+  cf_auc: number;
+  cf_f1: number;
+  cf_recall10: number;
+  cf_ndcg10: number;
+  ckan_auc: number;
+  ckan_f1: number;
+  ckan_recall10: number;
+  ckan_ndcg10: number;
+  delta_auc_pct: number;
+  delta_recall_pct: number;
+}
+
+export interface ColdStartSimulationResponse {
+  domain: DomainType;
+  interactions: number;
+  description: string;
+  currentMetrics: ColdStartMetrics;
+  trajectory: ColdStartMetrics[];
+  cfRecommendations: RecommendationItem[];
+  ckanRecommendations: RecommendationItem[];
+  explanation: string;
+}
+
+// Catalog Items
+export interface ItemDto {
+  id: number;
+  domain: DomainType;
+  title: string;
+  subtitle?: string;
+  category?: string;
+  posterUrl?: string | null;
+  releaseYear?: number;
+  details?: Record<string, any>;
+}
+
+export interface ItemListResponse {
+  domain: DomainType;
+  total: number;
+  page: number;
+  limit: number;
+  data: ItemDto[];
 }
 
 export interface User {
@@ -108,4 +189,3 @@ export interface UserHistoryResponse {
   limit: number;
   items: UserHistoryItem[];
 }
-

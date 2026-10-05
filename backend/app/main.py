@@ -13,6 +13,9 @@ from app.api.v1.recommendations import router as recs_router
 from app.api.v1.explainability import router as explain_router
 from app.api.v1.graph import router as graph_router
 from app.api.v1.users import router as users_router
+from app.api.v1.domains import router as domains_router
+from app.api.v1.benchmark import router as benchmark_router
+from app.api.v1.items import router as items_router
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s [%(name)s]: %(message)s")
 logger = logging.getLogger("main")
@@ -61,6 +64,9 @@ app.add_middleware(
 # Mount API v1 Routers
 api_v1_prefix = settings.API_V1_STR
 app.include_router(auth_router, prefix=api_v1_prefix)
+app.include_router(domains_router, prefix=api_v1_prefix)
+app.include_router(benchmark_router, prefix=api_v1_prefix)
+app.include_router(items_router, prefix=api_v1_prefix)
 app.include_router(movies_router, prefix=api_v1_prefix)
 app.include_router(ratings_router, prefix=api_v1_prefix)
 app.include_router(recs_router, prefix=api_v1_prefix)

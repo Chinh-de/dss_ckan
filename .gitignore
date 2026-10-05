@@ -61,9 +61,9 @@ pnpm-debug.log*
 
 # 4. Large ML Checkpoints & Intermediate Caches
 # Keep directories tracked via .gitkeep
-backend/models/*.pt
-backend/models/*.pth
-backend/models/*.bin
+*.pt
+*.pth
+*.bin
 backend/models/cache/*.pkl
 backend/models/cache/*.npy
 !backend/models/.gitkeep

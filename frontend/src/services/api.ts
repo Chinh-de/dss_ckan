@@ -1,9 +1,14 @@
 import {
   Movie,
   RecommendationItem,
+  RecommendationResponse,
   ExplanationResponse,
   SubgraphData,
   User,
+  DomainListResponse,
+  DomainType,
+  ColdStartSimulationResponse,
+  ItemListResponse,
 } from "../types";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string) || "/api/v1";
@@ -33,12 +38,69 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  // Recommendations
-  async getRecommendations(userId: number = 1, topK: number = 12): Promise<{ userId: number; total: number; recommendations: RecommendationItem[] }> {
-    return request(`/recommendations?userId=${userId}&topK=${topK}`);
+  // Domains
+  async getDomains(): Promise<DomainListResponse> {
+    return request("/domains");
   },
 
-  // Movies
+  // Multi-Domain Recommendations
+  async getRecommendations(
+    domain: DomainType = "movie",
+    userId: number = 1,
+    topK: number = 12
+  ): Promise<RecommendationResponse> {
+    return request(`/recommendations?domain=${domain}&userId=${userId}&topK=${topK}`);
+  },
+
+  // Interactive Feedback (Like / Dislike)
+  async submitFeedback(
+    domain: DomainType,
+    userId: number,
+    itemId: number,
+    action: "LIKE" | "DISLIKE"
+  ): Promise<any> {
+    return request("/recommendations/feedback", {
+      method: "POST",
+      body: JSON.stringify({ domain, userId, itemId, action }),
+    });
+  },
+
+  // Multi-Domain Explainability
+  async explainItem(
+    itemId: number,
+    domain: DomainType = "movie",
+    userId: number = 1
+  ): Promise<ExplanationResponse> {
+    return request(`/explainability/${itemId}?domain=${domain}&userId=${userId}`);
+  },
+
+  // Cold Start & Sparsity Simulation Benchmark
+  async simulateColdStart(
+    domain: DomainType = "movie",
+    interactions: number = 3
+  ): Promise<ColdStartSimulationResponse> {
+    return request(`/benchmark/cold-start?domain=${domain}&interactions=${interactions}`);
+  },
+
+  // Catalog Explorer
+  async getCatalogItems(
+    domain: DomainType = "movie",
+    page: number = 1,
+    limit: number = 20,
+    search?: string,
+    category?: string
+  ): Promise<ItemListResponse> {
+    const params = new URLSearchParams({
+      domain,
+      page: `${page}`,
+      limit: `${limit}`,
+    });
+    if (search) params.append("search", search);
+    if (category) params.append("category", category);
+    return request(`/items?${params.toString()}`);
+  },
+
+  // Backward-compatible Movie APIs
   async getMovies(page: number = 1, limit: number = 20, search?: string, genre?: string): Promise<{ data: Movie[]; total: number; page: number; limit: number; totalPages: number }> {
     const params = new URLSearchParams({ page: `${page}`, limit: `${limit}` });
     if (search) params.append("search", search);
@@ -72,11 +134,6 @@ export const api = {
 
   async getUserRatings(userId: number, page: number = 1, limit: number = 50): Promise<{ total: number; ratings: any[] }> {
     return request(`/ratings/user/${userId}?page=${page}&limit=${limit}`);
-  },
-
-  // Explainability
-  async explainMovie(movieId: number, userId: number = 1): Promise<ExplanationResponse> {
-    return request(`/explainability/${movieId}?userId=${userId}`);
   },
 
   // Knowledge Graph Subgraphs
@@ -151,4 +208,3 @@ export const api = {
     return request(`/users/${userId}/history?${params.toString()}`);
   },
 };
-
