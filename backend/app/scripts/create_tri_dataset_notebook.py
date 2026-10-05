@@ -185,56 +185,235 @@ Khi ma trận thưa thớt (>99% ô rỗng) hoặc người dùng mới (Cold-st
 | **Tổng Số Bộ Ba (Triples)** | 499,474 | 151,500 | 15,518 |
 """)
 
-add_code("""# ============================================================
-# 4. TẢI DỮ LIỆU ĐÃ TIỀN XỬ LÝ CHO CẢ 3 MIỀN (FAST-TRACK & VERIFIED)
+add_md(r"""## 3. THU THẬP & TIỀN XỬ LÝ DỮ LIỆU TỪ CÁC NGUỒN CHUẨN HỌC THUẬT (OFFICIAL DATASETS)
+
+Theo đúng quy chuẩn khoa học của các bài báo Recommender Systems kết hợp Knowledge Graph (RippleNet, KGCN, CKAN), dữ liệu nghiên cứu được thu thập từ các nguồn học thuật gốc và kho lưu trữ tác giả:
+
+1. **Đồ thị tri thức (Knowledge Graph Triples & Entity Mappings)**:
+   - **Nguồn chính thức**: Kho mã nguồn mở của bài báo gốc CKAN (SIGIR 2020 - Ze Wang et al.):
+     [https://github.com/weberrr/CKAN](https://github.com/weberrr/CKAN)
+   - Tệp dữ liệu: `kg.txt` (các bộ ba tri thức head - relation - tail), `item_index2entity_id.txt` (ánh xạ item sang entity ID).
+
+2. **Dữ liệu tương tác thô (Raw User-Item Ratings)**:
+   - **Âm nhạc (`music`) - Last.FM 2k**: GroupLens Research (HetRec 2011 Workshop)
+     Archive gốc: `http://files.grouplens.org/datasets/hetrec2011/hetrec2011-lastfm-2k.zip` (Tệp: `user_artists.dat`)
+     Academic Mirror: `https://raw.githubusercontent.com/hwwang55/KGCN/master/data/music/user_artists.dat`
+   - **Sách (`book`) - Book-Crossing**: Institut für Informatik, Universität Freiburg
+     Archive chuẩn: `https://raw.githubusercontent.com/hwwang55/RippleNet/master/data/book/BX-Book-Ratings.csv`
+   - **Điện ảnh (`movie`) - MovieLens**: GroupLens Research, University of Minnesota
+     Archive chuẩn: `https://raw.githubusercontent.com/hwwang55/RippleNet/master/data/movie/ratings.dat`
+
+Hệ thống sẽ **tự động tải về**, **giải nén (unzip)** các kho lưu trữ, và thực thi quy trình **tiền xử lý chuẩn** (khớp ánh xạ KG, lấy mẫu tương tác âm 1:1, chuyển đổi chỉ số ID liên tục).
+""")
+
+add_code(r"""# ============================================================
+# 4. TẢI DỮ LIỆU TỪ NGUỒN CHUẨN, GIẢI NÉN & TIỀN XỬ LÝ TỰ ĐỘNG
 # ============================================================
 import os
-import shutil
+import time
+import zipfile
 import urllib.request
+from collections import defaultdict
+import numpy as np
 
-BASE_URL = "https://raw.githubusercontent.com/Chinh-de/dss_ckan/main/backend/data/"
+# Cấu hình nguồn dữ liệu học thuật chính thức
+DATA_SOURCES = {
+    "music": {
+        "raw_file": "user_artists.dat",
+        "raw_urls": [
+            "https://raw.githubusercontent.com/hwwang55/KGCN/master/data/music/user_artists.dat",
+            "http://files.grouplens.org/datasets/hetrec2011/hetrec2011-lastfm-2k.zip"
+        ],
+        "is_zip": False,
+        "sep": "\t",
+        "threshold": 0.0,
+        "max_users": 0
+    },
+    "book": {
+        "raw_file": "BX-Book-Ratings.csv",
+        "raw_urls": [
+            "https://raw.githubusercontent.com/hwwang55/RippleNet/master/data/book/BX-Book-Ratings.csv"
+        ],
+        "is_zip": False,
+        "sep": ";",
+        "threshold": 0.0,
+        "max_users": 0
+    },
+    "movie": {
+        "raw_file": "ratings.dat",
+        "raw_urls": [
+            "https://raw.githubusercontent.com/hwwang55/RippleNet/master/data/movie/ratings.dat"
+        ],
+        "is_zip": False,
+        "sep": "::",
+        "threshold": 4.0,
+        "max_users": 2500
+    }
+}
 
-print("=== KIỂM TRA & ĐỒNG BỘ DỮ LIỆU ĐA MIỀN ===")
-for ds in active_datasets:
-    ds_dir = f"./data/{ds}"
+CKAN_OFFICIAL_REPO = "https://raw.githubusercontent.com/weberrr/CKAN/master/data/"
+
+def fetch_url(url, dest_path):
+    print(f"    -> Đang tải: {url} ...")
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+    with urllib.request.urlopen(req, timeout=30) as response, open(dest_path, "wb") as out_file:
+        out_file.write(response.read())
+
+def download_and_extract(ds_name):
+    cfg = DATA_SOURCES[ds_name]
+    ds_dir = f"./data/{ds_name}"
     os.makedirs(ds_dir, exist_ok=True)
-    for fname in ["ratings_final.npy", "kg_final.npy"]:
-        dest = os.path.join(ds_dir, fname)
-        
-        # Nếu tệp đã có và kích thước hợp lệ (> 1KB) thì bỏ qua
-        if os.path.exists(dest) and os.path.getsize(dest) > 1000:
-            print(f"  [Đã có sẵn] {ds}/{fname} ({round(os.path.getsize(dest)/1024, 1)} KB)")
-            continue
-            
-        # Tìm fallback trong repo cục bộ nếu đang chạy tại thư mục dự án
-        local_cand = None
-        for c in [f"../backend/data/{ds}/{fname}", f"./backend/data/{ds}/{fname}"]:
-            if os.path.exists(c) and os.path.getsize(c) > 1000:
-                local_cand = c
-                break
-                
-        if local_cand:
-            print(f"  [Sao chép local] {local_cand} -> {dest}")
-            shutil.copy(local_cand, dest)
-        else:
-            url = BASE_URL + f"{ds}/{fname}"
-            print(f"  [Tải từ GitHub] {url}...")
-            try:
-                urllib.request.urlretrieve(url, dest)
-                size_kb = round(os.path.getsize(dest) / 1024, 1)
-                if size_kb > 1:
-                    print(f"    -> Tải thành công! ({size_kb} KB)")
-                else:
-                    raise RuntimeError("Kích thước tệp tải về quá nhỏ hoặc rỗng!")
-            except Exception as e:
-                if os.path.exists(dest):
-                    try:
-                        os.remove(dest)
-                    except:
-                        pass
-                raise RuntimeError(f"LỖI TẢI DỮ LIỆU {ds}/{fname}: {e}\\nVui lòng kiểm tra lại URL GitHub: {url}")
+    
+    # 1. Tải các tệp KG chính thức từ kho mã nguồn tác giả bài báo CKAN (SIGIR 2020)
+    for kg_file in ["kg.txt", "item_index2entity_id.txt"]:
+        dest = os.path.join(ds_dir, kg_file)
+        if not os.path.exists(dest) or os.path.getsize(dest) < 1000:
+            url = CKAN_OFFICIAL_REPO + f"{ds_name}/{kg_file}"
+            fetch_url(url, dest)
+            print(f"       [OK] Tải {kg_file} ({round(os.path.getsize(dest)/1024, 1)} KB)")
 
-print("\\n[OK] TẤT CẢ TỆP DỮ LIỆU ĐÃ SẴN SÀNG ĐỂ CHẠY THỰC NGHIỆM!")
+    # 2. Tải tệp dữ liệu tương tác thô (Raw ratings)
+    raw_dest = os.path.join(ds_dir, cfg["raw_file"])
+    if not os.path.exists(raw_dest) or os.path.getsize(raw_dest) < 1000:
+        downloaded = False
+        for url in cfg["raw_urls"]:
+            try:
+                if url.endswith(".zip"):
+                    zip_dest = os.path.join(ds_dir, "archive.zip")
+                    fetch_url(url, zip_dest)
+                    print(f"       [Giải nén] Đang giải nén {zip_dest} ...")
+                    with zipfile.ZipFile(zip_dest, "r") as zf:
+                        zf.extractall(ds_dir)
+                    if os.path.exists(zip_dest):
+                        os.remove(zip_dest)
+                    downloaded = True
+                    break
+                else:
+                    fetch_url(url, raw_dest)
+                    downloaded = True
+                    break
+            except Exception as e:
+                print(f"       [Thử lại] Không thể tải từ {url}: {e}")
+        if not downloaded:
+            raise RuntimeError(f"Không thể tải tệp tương tác thô cho {ds_name} từ các nguồn chính thức.")
+        print(f"       [OK] Đã sẵn sàng {cfg['raw_file']} ({round(os.path.getsize(raw_dest)/1024, 1)} KB)")
+
+    return ds_dir
+
+def preprocess_and_cache(ds_name):
+    r_npy = f"./data/{ds_name}/ratings_final.npy"
+    k_npy = f"./data/{ds_name}/kg_final.npy"
+    
+    # Nếu đã được tiền xử lý trước đó, tái sử dụng trực tiếp
+    if os.path.exists(r_npy) and os.path.exists(k_npy):
+        print(f"  [Cache Sẵn Sàng] {ds_name.upper()} đã được tiền xử lý hợp lệ.")
+        return
+
+    print(f"\n>>> BẮT ĐẦU QUY TRÌNH TIỀN XỬ LÝ CHUẨN: {ds_name.upper()} <<<")
+    t0 = time.time()
+    ds_dir = download_and_extract(ds_name)
+    cfg = DATA_SOURCES[ds_name]
+    
+    # A. Đọc tệp ánh xạ Item sang Entity KG (item_index2entity_id.txt)
+    item_old2new = {}
+    entity_id2idx = {}
+    map_path = os.path.join(ds_dir, "item_index2entity_id.txt")
+    with open(map_path, "r", encoding="utf-8") as f:
+        for idx, line in enumerate(f):
+            parts = line.strip().split("\t")
+            if len(parts) >= 2:
+                item_old2new[parts[0]] = idx
+                entity_id2idx[parts[1]] = idx
+                
+    item_set = set(item_old2new.values())
+    user_pos = defaultdict(set)
+    user_neg = defaultdict(set)
+    
+    # B. Đọc và lọc tệp xếp hạng thô
+    raw_path = os.path.join(ds_dir, cfg["raw_file"])
+    with open(raw_path, "r", encoding="utf-8") as f:
+        header = f.readline()
+        for line in f:
+            parts = line.strip().split(cfg["sep"])
+            if ds_name == "book":
+                parts = [p.strip('\"') for p in parts]
+            if len(parts) < 3:
+                continue
+            u_old, i_old, r_str = parts[0], parts[1], parts[2]
+            if i_old not in item_old2new:
+                continue
+            i_new = item_old2new[i_old]
+            try:
+                r = float(r_str)
+            except:
+                continue
+            if r >= cfg["threshold"]:
+                user_pos[u_old].add(i_new)
+            else:
+                user_neg[u_old].add(i_new)
+                
+    # C. Lấy mẫu người dùng chuẩn (nếu có giới hạn max_users như trong bài báo)
+    if cfg["max_users"] > 0 and len(user_pos) > cfg["max_users"]:
+        np.random.seed(555)
+        selected_u = sorted(list(np.random.choice(list(user_pos.keys()), size=cfg["max_users"], replace=False)))
+        user_pos = {u: user_pos[u] for u in selected_u}
+        
+    # D. Lấy mẫu tương tác âm (Negative Sampling tỉ lệ 1:1)
+    rows = []
+    np.random.seed(555)
+    for u_new, (u_old, pos_items) in enumerate(user_pos.items()):
+        for it in pos_items:
+            rows.append((u_new, it, 1))
+        unwatched = item_set - pos_items
+        if u_old in user_neg:
+            unwatched -= user_neg[u_old]
+        if unwatched:
+            neg_items = np.random.choice(list(unwatched), size=len(pos_items), replace=(len(unwatched) < len(pos_items)))
+            for it in neg_items:
+                rows.append((u_new, it, 0))
+                
+    rating_np = np.array(rows, dtype=np.int32)
+    np.save(r_npy, rating_np)
+    
+    # E. Chuẩn hóa các bộ ba Đồ thị Tri thức (KG Triples)
+    kg_path = os.path.join(ds_dir, "kg.txt")
+    ent_cnt = len(entity_id2idx)
+    rel_id2idx = {}
+    rel_cnt = 0
+    kg_rows = []
+    with open(kg_path, "r", encoding="utf-8") as f:
+        for line in f:
+            parts = line.strip().split("\t")
+            if len(parts) != 3:
+                continue
+            h_old, r_old, t_old = parts[0], parts[1], parts[2]
+            if h_old not in entity_id2idx:
+                entity_id2idx[h_old] = ent_cnt
+                ent_cnt += 1
+            h = entity_id2idx[h_old]
+            if t_old not in entity_id2idx:
+                entity_id2idx[t_old] = ent_cnt
+                ent_cnt += 1
+            t = entity_id2idx[t_old]
+            if r_old not in rel_id2idx:
+                rel_id2idx[r_old] = rel_cnt
+                rel_cnt += 1
+            r = rel_id2idx[r_old]
+            kg_rows.append((h, r, t))
+            
+    kg_np = np.array(kg_rows, dtype=np.int32)
+    np.save(k_npy, kg_np)
+    
+    elapsed = round(time.time() - t0, 2)
+    print(f"  [HOÀN TẤT TIỀN XỬ LÝ {ds_name.upper()}] Thời gian: {elapsed}s")
+    print(f"  -> Users: {len(user_pos):,} | Items: {len(item_set):,} | Ratings: {len(rating_np):,} | Triples: {len(kg_np):,}\n")
+
+# Thực hiện tiền xử lý cho tất cả các tập dữ liệu đã chọn
+print("=== KHỞI ĐỘNG ĐỒNG BỘ NGUỒN DỮ LIỆU GỐC & TIỀN XỬ LÝ ===")
+for ds in active_datasets:
+    preprocess_and_cache(ds)
+
+print("[OK] TẤT CẢ DỮ LIỆU ĐÃ ĐƯỢC TẢI TỪ NGUỒN CHUẨN, GIẢI NÉN VÀ TIỀN XỬ LÝ SẴN SÀNG!")
 """)
 
 add_code("""# ============================================================
