@@ -20,29 +20,25 @@ def add_code(text):
     nb['cells'].append({'cell_type': 'code', 'execution_count': None, 'metadata': {}, 'outputs': [], 'source': [l + '\n' for l in text.split('\n')]})
 
 # ============================================================
-# 0. HEADER & GIỚI THIỆU ĐỀ TÀI KHOA HỌC
+# 0. HEADER & GIỚI THIỆU NOTEBOOK
 # ============================================================
-add_md(r"""# NGHIÊN CỨU & ĐÁNH GIÁ THỰC NGHIỆM ĐA MIỀN: MÔ HÌNH CKAN TRONG HỆ THỐNG GỢI Ý
-## COLLABORATIVE KNOWLEDGE-AWARE ATTENTIVE NETWORK FOR RECOMMENDER SYSTEMS
-### Đánh Giá Toàn Diện: CTR Prediction • Top-K Ranking • Khảo Sát Độ Thưa Thớt (Data Sparsity)
-**Tập Dữ Liệu Học Thuật Chuẩn**: MovieLens-1M (`movie`), Book-Crossing (`book`), Last.FM (`music`)
-**Môi Trường Thực Nghiệm**: Google Colab GPU (NVIDIA Tesla T4 / RTX 3050)
-**Mô Hình So Sánh Đối Chuẩn**: MostPopular vs Item-KNN vs Biased Matrix Factorization vs CKAN (Proposed)
+add_md(r"""# Benchmark Mô hình CKAN trên 3 tập dữ liệu (Movie, Book, Music)
+### So sánh: MostPopular vs Item-KNN vs Matrix Factorization vs CKAN
 
----
+Notebook này chạy thử nghiệm và đánh giá mô hình **CKAN (Collaborative Knowledge-aware Attentive Network)** trên 3 tập dữ liệu:
+- **Movie**: MovieLens-1M + Microsoft Satori KG
+- **Book**: Book-Crossing + Stanford SNAP/KB KG
+- **Music**: Last.FM + KG
 
-### TÓM TẮT ĐỀ TÀI (ABSTRACT):
-Hệ thống gợi ý truyền thống (Lọc cộng tác - Collaborative Filtering) gặp phải hai rào cản cốt tử: **Độ thưa thớt dữ liệu (Data Sparsity)** và **Khởi động lạnh (Cold-start)**. Đề tài này tập trung triển khai và đánh giá sâu mô hình **CKAN (Collaborative Knowledge-aware Attentive Network)** — một kiến trúc kết hợp Đồ thị Tri thức (Knowledge Graph - KG) với cơ chế lan truyền cộng tác hai chiều và mạng chú ý tri thức (Knowledge-aware Attention).
-
-Toàn bộ nghiên cứu được thực nghiệm trên **3 miền dữ liệu đặc thù**:
-1. **Điện ảnh (`movie`)**: Mật độ tương tác trung bình, đồ thị tri thức dày đặc (102k thực thể, 499k bộ ba).
-2. **Sách (`book`)**: Mật độ tương tác cực kỳ thưa thớt (>99.97% ô rỗng), đồ thị 77k thực thể.
-3. **Âm nhạc (`music`)**: Số lượng nghệ sĩ tập trung (3.8k items), đồ thị đa quan hệ phong phú (60 loại quan hệ).
-
-### HỆ THỐNG THANG ĐO ĐÁNH GIÁ (EVALUATION PROTOCOLS):
-- **Bài toán 1 - Dự đoán Tương tác (CTR Prediction)**: ROC-AUC, F1-Score, Accuracy.
-- **Bài toán 2 - Xếp hạng Danh sách (Top-K Recommendation)**: Recall@K, NDCG@K, Precision@K ($K \in \{5, 10, 20\}$).
-- **Bài toán 3 - Khảo sát Độ thưa thớt (Sparsity Stress Test)**: Kiểm thử khả năng chống suy thoái khi chỉ có 10% dữ liệu tương tác.
+### Nội dung thực hiện:
+1. **Khám phá dữ liệu (EDA)**: Thống kê số lượng user, item, rating, độ thưa (sparsity), tỉ lệ cold-start và cấu trúc Knowledge Graph.
+2. **Baselines**: Cài đặt gọn nhẹ 3 mô hình cơ bản (MostPopular, Item-KNN dùng `scikit-learn`, Matrix Factorization dùng `PyTorch`).
+3. **Mô hình CKAN**: Tách rõ từng module độc lập (Sampler, Attention, Aggregator, Model, Trainer, Top-K Evaluator).
+4. **Đánh giá trên 3 bài test**:
+   - **CTR Prediction**: Đo AUC, F1, Accuracy.
+   - **Top-K Ranking**: Đánh giá Recall@K, NDCG@K, Precision@K với K = 5, 10, 20.
+   - **Sparsity Test (10% Data)**: Giảm 90% lượng rating để kiểm tra độ ổn định của mô hình khi dữ liệu thưa.
+5. **Xuất kết quả**: Bảng thống kê (CSV) và các biểu đồ (PNG) được lưu vào thư mục `./outputs/` để tiện lấy dùng vào báo cáo hoặc đưa vào code khác.
 """)
 
 # ============================================================
@@ -53,7 +49,7 @@ add_code(r"""# ============================================================
 # ============================================================
 import torch
 
-print("=== KIỂM TRA PHẦN CỨNG VÀ BỘ NHỚ ===")
+print("=== KIỂM TRA PHẦN CỨNG ===")
 print("Phiên bản PyTorch :", torch.__version__)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Thiết bị tính toán:", device)
@@ -66,7 +62,7 @@ if torch.cuda.is_available():
 # 2. CÀI ĐẶT THƯ VIỆN & SEED
 # ============================================================
 add_code(r"""# ============================================================
-# 2. CÀI ĐẶT THƯ VIỆN & THIẾT LẬP REPRODUCIBILITY SEED
+# 2. CÀI ĐẶT THƯ VIỆN & THIẾT LẬP RANDOM SEED
 # ============================================================
 !pip install -q --upgrade scikit-learn scipy matplotlib seaborn pandas tqdm
 
@@ -76,277 +72,260 @@ import random
 import zipfile
 import urllib.request
 import collections
-from collections import defaultdict
+from collections import defaultdict, Counter
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
 from scipy.sparse import csr_matrix
-import matplotlib.pyplot as plt
-import seaborn as sns
-from tqdm import tqdm
 from sklearn.neighbors import NearestNeighbors
 from sklearn.metrics import roc_auc_score, f1_score, accuracy_score
+import matplotlib.pyplot as plt
+import seaborn as sns
+import torch.nn as nn
+import torch.nn.functional as F
 
-# Thiết lập Seed toàn cục đảm bảo tính tái lập (Reproducibility)
 SEED = 42
 random.seed(SEED)
 np.random.seed(SEED)
 torch.manual_seed(SEED)
 if torch.cuda.is_available():
+    torch.cuda.manual_seed(SEED)
     torch.cuda.manual_seed_all(SEED)
 
-sns.set_theme(style="whitegrid")
 plt.rcParams['font.sans-serif'] = 'DejaVu Sans'
+plt.rcParams['axes.edgecolor'] = '#D1D5DB'
+plt.rcParams['axes.linewidth'] = 1.0
+
+# Tạo sẵn thư mục lưu kết quả và hình ảnh
+os.makedirs("./outputs", exist_ok=True)
 print("[OK] Đã sẵn sàng thư viện chuẩn và thiết lập Seed:", SEED)
 """)
 
 # ============================================================
-# 3. PHƯƠNG PHÁP LUẬN TOÁN HỌC & KIẾN TRÚC CKAN
+# 3. KIẾN TRÚC MÔ HÌNH CKAN
 # ============================================================
-add_md(r"""## 2. PHƯƠNG PHÁP LUẬN TOÁN HỌC & KIẾN TRÚC MÔ HÌNH CKAN
+add_md(r"""## 2. Kiến trúc mô hình CKAN
 
-### 2.1. Động Lực Nghiên Cứu (Why CKAN?)
-Các phương pháp lọc cộng tác truyền thống (CF/Matrix Factorization) dựa dẫm hoàn toàn vào ma trận tương tác User-Item:
+### 2.1. Ý tưởng chính
+Lọc cộng tác truyền thống (Matrix Factorization) tính điểm dựa trên tích vô hướng latent vector:
 $$y_{u, v} = \sigma(\mathbf{u}_u^T \mathbf{v}_v)$$
-Khi ma trận thưa thớt (>99% ô rỗng) hoặc người dùng mới (Cold-start), MF bị suy biến nặng nề (Data Starvation). 
+Khi ma trận quá thưa (nhiều ô rỗng) hoặc gặp user/item mới (cold-start), mô hình không có đủ tương tác để học tốt.
 
-**CKAN giải quyết bài toán này bằng cách kết hợp Đồ thị Tri thức (KG) với cơ chế Lan truyền Cộng tác Hai Chiều (Bi-directional Collaborative Propagation):**
-- **Nhánh Người dùng (User Branch)**: Lan truyền sở thích từ các phim/sách đã thích ra các thực thể liên quan (Đạo diễn, Diễn viên, Thể loại, Tác giả).
-- **Nhánh Sản phẩm (Item Branch)**: Lan truyền ngữ nghĩa của phim/sách ứng viên ra các thực thể láng giềng và các sản phẩm đồng tương tác.
+CKAN giải quyết vấn đề này bằng cách kết hợp Knowledge Graph (KG) theo hai nhánh:
+- **User Branch**: Lan truyền sở thích từ các item người dùng từng tương tác sang các entity liên quan trên KG (đạo diễn, diễn viên, thể loại, tác giả...).
+- **Item Branch**: Lan truyền thông tin ngữ nghĩa từ item ứng viên sang các láng giềng trên KG.
+- **Attention Layer**: Dùng mạng nơ-ron tính attention weight giữa quan hệ và ngữ cảnh tương tác để lọc bớt liên kết nhiễu.
 
 ```
-                    [ LỊCH SỬ NGƯỜI DÙNG: S(u) ]                     [ PHIM / SÁCH ỨNG VIÊN: v ]
-                                │                                                 │
-                  0-hop: e_u^(0) = mean(e_items)                     0-hop: e_v^(0) = e_v
-                                │                                                 │
-                                ▼                                                 ▼
-                  [ User Ripple Set: E_u^l ]                       [ Item Ripple Set: E_v^l ]
-                        (h, r, t)                                        (h, r, t)
-                                │                                                 │
-                                ▼                                                 ▼
-             ┌────────────────────────────────────┐             ┌────────────────────────────────────┐
-             │   KNOWLEDGE-AWARE ATTENTION UNIT   │             │   KNOWLEDGE-AWARE ATTENTION UNIT   │
-             │   s = MLP([e_h ; e_r])             │             │   s = MLP([e_h ; e_r])             │
-             │   alpha = Softmax(s)               │             │   alpha = Softmax(s)               │
-             │   e_u^l = sum(alpha * e_t)         │             │   e_v^l = sum(alpha * e_t)         │
-             └──────────────────┬─────────────────┘             └──────────────────┬─────────────────┘
-                                │                                                 │
-                                ▼                                                 ▼
-             [ Aggregator: Concat / Sum / Pool ]               [ Aggregator: Concat / Sum / Pool ]
-                     Vector người dùng: e_u                            Vector sản phẩm: e_v
-                                └───────────────────────┬─────────────────────────┘
-                                                        │
-                                                        ▼
-                                         [ DỰ ĐOÁN XÁC SUẤT TƯƠNG TÁC ]
-                                          y_hat = Sigmoid(e_u^T * e_v)
+                    [ Lịch sử tương tác của User ]                   [ Item ứng viên: v ]
+                                 │                                             │
+                   0-hop: e_u^(0) = mean(e_items)                 0-hop: e_v^(0) = e_v
+                                 │                                             │
+                                 ▼                                             ▼
+                    [ User Ripple Set: E_u^l ]                    [ Item Ripple Set: E_v^l ]
+                          (h, r, t)                                     (h, r, t)
+                                 │                                             │
+                                 ▼                                             ▼
+              ┌────────────────────────────────────┐         ┌────────────────────────────────────┐
+              │          ATTENTION LAYER           │         │          ATTENTION LAYER           │
+              │   s = MLP([e_h ; e_r])             │         │   s = MLP([e_h ; e_r])             │
+              │   alpha = Softmax(s)               │         │   alpha = Softmax(s)               │
+              │   e_u^l = sum(alpha * e_t)         │         │   e_v^l = sum(alpha * e_t)         │
+              └──────────────────┬─────────────────┘         └──────────────────┬─────────────────┘
+                                 │                                             │
+                                 ▼                                             ▼
+                        [ Aggregator Layer ]                          [ Aggregator Layer ]
+                        Vector user: e_u                              Vector item: e_v
+                                 └───────────────────────┬─────────────────────┘
+                                                         │
+                                                         ▼
+                                                [ Điểm dự đoán ]
+                                           y_hat = Sigmoid(e_u^T * e_v)
 ```
-
----
-
-### 2.2. Các Bước Tính Toán Toán Học Trong Thuật Toán CKAN
-
-1. **Khởi tạo Hạt giống (Seed Entities)**:
-   - Phía User (0-hop): Trung bình các sản phẩm đã tương tác tích cực trong tập huấn luyện:
-     $$\mathbf{e}_u^{(0)} = \frac{1}{|S(u)|} \sum_{v \in S(u)} \mathbf{e}_v$$
-   - Phía Item (0-hop): Vector nhúng của chính sản phẩm ứng viên:
-     $$\mathbf{e}_v^{(0)} = \mathbf{e}_v$$
-
-2. **Lan truyền Tri thức qua $L$ bước nhảy (Multi-hop Knowledge Ripple Sets)**:
-   - Với mỗi tầng $l \in \{1, \dots, L\}$, truy vấn các bộ ba tri thức láng giềng $\mathcal{E}^l = \{(h, r, t)\}$.
-   - Để cố định kích thước tensor tính toán trên GPU, lấy mẫu:
-     - User Triple Set Size: $\text{UTSS} = 32$ (Movie/Music), $16$ (Book).
-     - Item Triple Set Size: $\text{ITSS} = 64$ (Movie/Book), $32$ (Music).
-
-3. **Cơ chế Chú Ý Tri Thức (Knowledge-aware Attention Layer)**:
-   - Mức độ ảnh hưởng của quan hệ $r$ nối với thực thể đầu $h$ được tính bằng mạng nơ-ron đa tầng (MLP):
-     $$s_i(h_i, r_i) = \sigma\left( \mathbf{W}_2 \cdot \text{ReLU}(\mathbf{W}_1 [\mathbf{e}_{h_i} \parallel \mathbf{e}_{r_i}]) \right)$$
-   - Chuẩn hóa Softmax trên toàn bộ tập bộ ba:
-     $$\alpha_i = \frac{\exp(s_i)}{\sum_{j} \exp(s_j)}$$
-   - Biểu diễn tổng hợp ở tầng $l$ là tổng có trọng số của các thực thể đuôi $t$:
-     $$\mathbf{e}^l = \sum_i \alpha_i \cdot \mathbf{e}_{t_i}$$
-
-4. **Bộ Tổng Hợp Đa Tầng (Multi-layer Aggregator)**:
-   - Chiến lược Ghép nối (Concat - Khuyên dùng trong bài báo gốc):
-     $$\mathbf{e}_u = [\mathbf{e}_u^{(L)} \parallel \dots \parallel \mathbf{e}_u^{(0)}], \quad \mathbf{e}_v = [\mathbf{e}_v^{(L)} \parallel \dots \parallel \mathbf{e}_v^{(0)}]$$
-   - Giúp bảo toàn không gian đặc trưng giữa thực thể gốc và tri thức lan truyền.
-
-5. **Dự Đoán Tương Tác & Tối Ưu Hóa Hàm Mất Mát**:
-   - Xác suất tương tác dự đoán:
-     $$\hat{y}(u, v) = \sigma(\mathbf{e}_u^T \mathbf{e}_v) = \frac{1}{1 + \exp(-\mathbf{e}_u^T \mathbf{e}_v)}$$
-   - Tối ưu hóa bằng Binary Cross-Entropy Loss kết hợp phạt điều chuẩn $L_2$ Weight Decay:
-     $$\mathcal{L} = -\sum_{(u, v) \in \mathcal{D}} \left[ y_{u, v} \log \hat{y}(u, v) + (1 - y_{u, v}) \log(1 - \hat{y}(u, v)) \right] + \lambda \|\Theta\|_2^2$$
-
----
-
-### 2.3. Bảng Đặc Tính Của 3 Tập Dữ Liệu Nghiên Cứu
-
-| Chỉ số thống kê | MovieLens-1M (`movie`) | Book-Crossing (`book`) | Last.FM (`music`) |
-| :--- | :---: | :---: | :---: |
-| **Miền ứng dụng** | Điện ảnh (Phim) | Sách & Văn học | Âm nhạc (Nghệ sĩ) |
-| **Số Người dùng (Users)** | 2,500 | 17,860 | 1,872 |
-| **Số Sản phẩm (Items)** | 16,946 | 14,967 | 3,846 |
-| **Số Lượng Tương tác** | 238,442 | 139,746 | 42,346 |
-| **Độ Thưa Thớt (Sparsity)** | 99.44% | **> 99.97% (Cực thưa)** | 99.41% |
-| **Số Thực Thể KG (Entities)** | 102,569 | 77,903 | 9,366 |
-| **Số Quan Hệ KG (Relations)**| 32 | 25 | **60 (Đa dạng nhất)** |
-| **Tổng Số Bộ Ba (Triples)** | 499,474 | 151,500 | 15,518 |
 """)
 
 # ============================================================
-# 4. CHỌN DATASET CẦN CHẠY
+# 4. CẤU HÌNH THỰC NGHIỆM
 # ============================================================
 add_code(r"""# ============================================================
-# 3. CHỌN TẬP DỮ LIỆU CẦN CHẠY THỰC NGHIỆM
+# 3. CẤU HÌNH SIÊU THAM SỐ (HYPERPARAMETERS)
 # ============================================================
-# Bạn có thể chọn: "movie" (Phim) | "book" (Sách) | "music" (Âm nhạc) | "all" (Chạy cả 3 miền)
-TARGET_DATASET = "all"
-
-DATASETS_CONFIG = {
-    "movie": {"dim": 64, "n_layer": 1, "itss": 64, "utss": 32, "batch_size": 2048, "lr": 0.002},
-    "book":  {"dim": 64, "n_layer": 2, "itss": 64, "utss": 16, "batch_size": 1024, "lr": 0.002},
-    "music": {"dim": 64, "n_layer": 1, "itss": 32, "utss": 16, "batch_size": 512,  "lr": 0.001}
-}
-
-active_datasets = ["movie", "book", "music"] if TARGET_DATASET == "all" else [TARGET_DATASET]
-print(f"Chế độ thực nghiệm: {TARGET_DATASET.upper()} -> Các tập dữ liệu sẽ chạy: {active_datasets}")
-""")
-
-# ============================================================
-# 5. DATA PIPELINE: NGUỒN CHUẨN + UNZIP + TIỀN XỬ LÝ
-# ============================================================
-add_md(r"""## 4. THU THẬP & TIỀN XỬ LÝ DỮ LIỆU TỪ NGUỒN HỌC THUẬT CHUẨN
-
-Theo chuẩn nghiên cứu của các bài báo Recommender Systems kết hợp Knowledge Graph:
-1. **Đồ thị tri thức (KG Triples & Entity Mappings)**: Tải trực tiếp từ repository gốc của bài báo CKAN (SIGIR 2020 - Ze Wang et al.):
-   [https://github.com/weberrr/CKAN](https://github.com/weberrr/CKAN)
-2. **Dữ liệu tương tác thô (Raw Ratings)**:
-   - **Âm nhạc (`music`) - Last.FM 2k**: GroupLens HetRec 2011 Workshop (`user_artists.dat`)
-   - **Sách (`book`) - Book-Crossing**: University of Freiburg / Benchmark Archive (`BX-Book-Ratings.csv`)
-   - **Điện ảnh (`movie`) - MovieLens**: GroupLens Research / Benchmark Archive (`ratings.dat`)
-
-Toàn bộ quá trình **tải tệp**, **tự động giải nén (unzip)** và **tiền xử lý chuẩn** (Negative Sampling 1:1, khớp ID thực thể KG) được tự động hóa hoàn toàn.
-""")
-
-add_code(r"""# ============================================================
-# 4. TẢI DỮ LIỆU TỪ NGUỒN CHUẨN, GIẢI NÉN & TIỀN XỬ LÝ TỰ ĐỘNG
-# ============================================================
-DATA_SOURCES = {
-    "music": {
-        "raw_file": "user_artists.dat",
-        "raw_urls": [
-            "https://raw.githubusercontent.com/hwwang55/KGCN/master/data/music/user_artists.dat",
-            "http://files.grouplens.org/datasets/hetrec2011/hetrec2011-lastfm-2k.zip"
-        ],
-        "sep": "\t", "threshold": 0.0, "max_users": 0
+CONFIG = {
+    "movie": {
+        "dim": 64,
+        "n_layer": 1,
+        "itss": 64,
+        "utss": 32,
+        "lr": 0.002,
+        "l2_weight": 1e-5,
+        "batch_size": 2048,
+        "n_epochs": 10,
+        "ratio": 1.0
     },
     "book": {
-        "raw_file": "BX-Book-Ratings.csv",
-        "raw_urls": [
-            "https://raw.githubusercontent.com/hwwang55/RippleNet/master/data/book/BX-Book-Ratings.csv"
-        ],
-        "sep": ";", "threshold": 0.0, "max_users": 0
+        "dim": 64,
+        "n_layer": 1,
+        "itss": 64,
+        "utss": 16,
+        "lr": 0.001,
+        "l2_weight": 1e-5,
+        "batch_size": 1024,
+        "n_epochs": 8,
+        "ratio": 1.0
     },
-    "movie": {
-        "raw_file": "ratings.dat",
-        "raw_urls": [
-            "https://raw.githubusercontent.com/hwwang55/RippleNet/master/data/movie/ratings.dat"
-        ],
-        "sep": "::", "threshold": 4.0, "max_users": 2500
+    "music": {
+        "dim": 64,
+        "n_layer": 1,
+        "itss": 32,
+        "utss": 32,
+        "lr": 0.002,
+        "l2_weight": 1e-5,
+        "batch_size": 1024,
+        "n_epochs": 10,
+        "ratio": 1.0
     }
 }
 
-CKAN_OFFICIAL_REPO = "https://raw.githubusercontent.com/weberrr/CKAN/master/data/"
+active_datasets = ["movie", "book", "music"]
+print("[OK] Đã thiết lập cấu hình tham số cho:", active_datasets)
+""")
 
-def fetch_url(url, dest_path):
-    print(f"    -> Đang tải: {url} ...")
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=30) as resp, open(dest_path, "wb") as out:
-        out.write(resp.read())
+# ============================================================
+# 5. DATA PIPELINE TỰ ĐỘNG TẢI TỪ NGUỒN CHUẨN
+# ============================================================
+add_md(r"""## 4. Tải và chuẩn bị dữ liệu
+
+Dữ liệu được tải trực tiếp từ nguồn chuẩn của benchmark CKAN (GroupLens MovieLens, Stanford SNAP và tác giả repo CKAN). Code tự động tải file zip, giải nén vào thư mục `./data/` và nạp vào bộ nhớ.
+""")
+
+add_code(r"""# ============================================================
+# 4. TẢI VÀ CHUẨN BỊ DỮ LIỆU TỪ NGUỒN CHUẨN
+# ============================================================
+DATA_SOURCES = {
+    "movie": {
+        "url": "https://raw.githubusercontent.com/weberrr/CKAN/master/data/movie.zip",
+        "fallback_urls": [
+            "https://github.com/weberrr/CKAN/raw/master/data/movie.zip",
+            "https://files.grouplens.org/datasets/movielens/ml-1m.zip"
+        ],
+        "dir": "./data/movie",
+        "rating_threshold": 4,
+        "min_user_ratings": 10
+    },
+    "book": {
+        "url": "https://raw.githubusercontent.com/weberrr/CKAN/master/data/book.zip",
+        "fallback_urls": [
+            "https://github.com/weberrr/CKAN/raw/master/data/book.zip"
+        ],
+        "dir": "./data/book",
+        "rating_threshold": 0,
+        "min_user_ratings": 5
+    },
+    "music": {
+        "url": "https://raw.githubusercontent.com/weberrr/CKAN/master/data/music.zip",
+        "fallback_urls": [
+            "https://github.com/weberrr/CKAN/raw/master/data/music.zip"
+        ],
+        "dir": "./data/music",
+        "rating_threshold": 0,
+        "min_user_ratings": 5
+    }
+}
 
 def download_and_extract(ds_name):
     cfg = DATA_SOURCES[ds_name]
-    ds_dir = f"./data/{ds_name}"
-    os.makedirs(ds_dir, exist_ok=True)
+    target_dir = cfg["dir"]
+    os.makedirs(target_dir, exist_ok=True)
     
-    # 1. Tải KG chính thức từ kho tác giả bài báo CKAN
-    for kg_file in ["kg.txt", "item_index2entity_id.txt"]:
-        dest = os.path.join(ds_dir, kg_file)
-        if not os.path.exists(dest) or os.path.getsize(dest) < 1000:
-            fetch_url(CKAN_OFFICIAL_REPO + f"{ds_name}/{kg_file}", dest)
-            print(f"       [OK] Tải {kg_file} ({round(os.path.getsize(dest)/1024, 1)} KB)")
-
-    # 2. Tải tương tác thô (và giải nén nếu là zip)
-    raw_dest = os.path.join(ds_dir, cfg["raw_file"])
-    if not os.path.exists(raw_dest) or os.path.getsize(raw_dest) < 1000:
-        for url in cfg["raw_urls"]:
-            try:
-                if url.endswith(".zip"):
-                    zip_dest = os.path.join(ds_dir, "archive.zip")
-                    fetch_url(url, zip_dest)
-                    print(f"       [Giải nén] Đang giải nén {zip_dest} ...")
-                    with zipfile.ZipFile(zip_dest, "r") as zf:
-                        zf.extractall(ds_dir)
-                    if os.path.exists(zip_dest): os.remove(zip_dest)
-                    break
-                else:
-                    fetch_url(url, raw_dest)
-                    break
-            except Exception as e:
-                print(f"       [Thử lại] {e}")
-        print(f"       [OK] Đã có {cfg['raw_file']} ({round(os.path.getsize(raw_dest)/1024, 1)} KB)")
-    return ds_dir
-
-def preprocess_and_cache(ds_name):
-    r_npy = f"./data/{ds_name}/ratings_final.npy"
-    k_npy = f"./data/{ds_name}/kg_final.npy"
-    if os.path.exists(r_npy) and os.path.exists(k_npy):
-        print(f"  [Cache Sẵn Sàng] {ds_name.upper()} đã được tiền xử lý hợp lệ.")
+    # Kiểm tra nếu đã có file npy thì dùng luôn
+    if os.path.exists(os.path.join(target_dir, "ratings_final.npy")) and os.path.exists(os.path.join(target_dir, "kg_final.npy")):
+        print(f"  [OK] Tập dữ liệu {ds_name} đã sẵn sàng trong {target_dir}")
         return
 
-    print(f"\n>>> BẮT ĐẦU TIỀN XỬ LÝ CHUẨN: {ds_name.upper()} <<<")
-    t0 = time.time()
-    ds_dir = download_and_extract(ds_name)
-    cfg = DATA_SOURCES[ds_name]
+    # Nếu chưa có, tải file zip
+    zip_path = os.path.join(target_dir, f"{ds_name}.zip")
+    urls_to_try = [cfg["url"]] + cfg["fallback_urls"]
+    downloaded = False
     
-    # 1. Đọc ánh xạ item sang KG entity
-    item_old2new, entity_id2idx = {}, {}
+    for url in urls_to_try:
+        try:
+            print(f"  [DOWNLOAD] Đang tải {ds_name} từ {url}...")
+            urllib.request.urlretrieve(url, zip_path)
+            if os.path.exists(zip_path) and os.path.getsize(zip_path) > 1000:
+                downloaded = True
+                print(f"  [DOWNLOAD] Tải thành công ({round(os.path.getsize(zip_path)/1e6, 2)} MB)")
+                break
+        except Exception as e:
+            print(f"  [WARN] Không thể tải từ {url}: {e}")
+
+    if downloaded:
+        try:
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(target_dir)
+            print(f"  [UNZIP] Đã giải nén vào {target_dir}")
+        except Exception as e:
+            print(f"  [ERROR] Lỗi giải nén: {e}")
+
+for ds in active_datasets:
+    download_and_extract(ds)
+""")
+
+add_code(r"""# ============================================================
+# TIỀN XỬ LÝ VÀ CHUYỂN ĐỔI SANG ĐỊNH DẠNG NUMPY (.NPY)
+# ============================================================
+def preprocess_and_cache(ds_name):
+    ds_dir = f"./data/{ds_name}"
+    r_npy = os.path.join(ds_dir, "ratings_final.npy")
+    k_npy = os.path.join(ds_dir, "kg_final.npy")
+    
+    if os.path.exists(r_npy) and os.path.exists(k_npy):
+        r_test = np.load(r_npy)
+        k_test = np.load(k_npy)
+        if len(r_test) > 0 and len(k_test) > 0:
+            print(f"  [CACHE OK] {ds_name.upper()}: Ratings={len(r_test):,} | Triples={len(k_test):,}")
+            return
+
+    print(f"  [PREPROCESS] Đang tiền xử lý dữ liệu cho {ds_name}...")
+    
+    # 1. Đọc ánh xạ item sang entity
+    item_id2idx, entity_id2idx = {}, {}
     with open(os.path.join(ds_dir, "item_index2entity_id.txt"), "r", encoding="utf-8") as f:
-        for idx, line in enumerate(f):
-            p = line.strip().split("\t")
-            if len(p) >= 2:
-                item_old2new[p[0]] = idx
-                entity_id2idx[p[1]] = idx
-                
-    item_set = set(item_old2new.values())
-    user_pos, user_neg = defaultdict(set), defaultdict(set)
-    
-    # 2. Đọc xếp hạng thô
-    with open(os.path.join(ds_dir, cfg["raw_file"]), "r", encoding="utf-8") as f:
-        f.readline()
         for line in f:
-            p = line.strip().split(cfg["sep"])
-            if ds_name == "book": p = [x.strip('\"') for x in p]
-            if len(p) < 3 or p[1] not in item_old2new: continue
-            try: r = float(p[2])
-            except: continue
-            if r >= cfg["threshold"]: user_pos[p[0]].add(item_old2new[p[1]])
-            else: user_neg[p[0]].add(item_old2new[p[1]])
-                
-    # 3. Lấy mẫu người dùng chuẩn (nếu có cấu hình max_users)
-    if cfg["max_users"] > 0 and len(user_pos) > cfg["max_users"]:
-        np.random.seed(555)
-        sel_u = sorted(list(np.random.choice(list(user_pos.keys()), size=cfg["max_users"], replace=False)))
-        user_pos = {u: user_pos[u] for u in sel_u}
-        
-    # 4. Lấy mẫu tương tác âm 1:1
+            parts = line.strip().split("\t")
+            if len(parts) >= 2:
+                it_id, ent_id = parts[0], parts[1]
+                idx = len(item_id2idx)
+                item_id2idx[it_id] = idx
+                entity_id2idx[ent_id] = idx
+
+    # 2. Đọc ratings
+    user_pos = defaultdict(set)
+    user_neg = defaultdict(set)
+    with open(os.path.join(ds_dir, "ratings.txt"), "r", encoding="utf-8") as f:
+        for line in f:
+            p = line.strip().split("\t")
+            if len(p) >= 3 and p[1] in item_id2idx:
+                u, it, r = p[0], item_id2idx[p[1]], float(p[2])
+                thresh = DATA_SOURCES[ds_name]["rating_threshold"]
+                if thresh == 0 or r >= thresh:
+                    user_pos[u].add(it)
+                else:
+                    user_neg[u].add(it)
+
+    # 3. Lọc user theo min ratings
+    min_u = DATA_SOURCES[ds_name]["min_user_ratings"]
+    valid_users = {u: items for u, items in user_pos.items() if len(items) >= min_u}
+    item_set = set()
+    for items in valid_users.values(): item_set.update(items)
+    
+    # 4. Tạo mẫu âm tính (Negative sampling)
+    all_items = list(item_set)
     rows = []
-    np.random.seed(555)
-    for u_new, (u_old, pos_items) in enumerate(user_pos.items()):
+    for u_new, (u_old, pos_items) in enumerate(valid_users.items()):
         for it in pos_items: rows.append((u_new, it, 1))
-        unwatched = item_set - pos_items
-        if u_old in user_neg: unwatched -= user_neg[u_old]
-        if unwatched:
-            neg_items = np.random.choice(list(unwatched), size=len(pos_items), replace=(len(unwatched) < len(pos_items)))
+        neg_candidates = list(set(all_items) - pos_items)
+        if len(neg_candidates) >= len(pos_items):
+            neg_items = np.random.choice(neg_candidates, size=len(pos_items), replace=False)
             for it in neg_items: rows.append((u_new, it, 0))
     rating_np = np.array(rows, dtype=np.int32)
     np.save(r_npy, rating_np)
@@ -366,7 +345,7 @@ def preprocess_and_cache(ds_name):
             
     kg_np = np.array(kg_rows, dtype=np.int32)
     np.save(k_npy, kg_np)
-    print(f"  [HOÀN TẤT {ds_name.upper()}] Users: {len(user_pos):,} | Items: {len(item_set):,} | Ratings: {len(rating_np):,} | Triples: {len(kg_np):,}")
+    print(f"  [HOÀN TẤT {ds_name.upper()}] Users: {len(valid_users):,} | Items: {len(item_set):,} | Ratings: {len(rating_np):,} | Triples: {len(kg_np):,}")
 
 for ds in active_datasets:
     preprocess_and_cache(ds)
@@ -374,21 +353,22 @@ print("[OK] Toàn bộ dữ liệu từ nguồn chuẩn đã sẵn sàng!")
 """)
 
 # ============================================================
-# 5. KHÁM PHÁ DỮ LIỆU & ĐỒ THỊ TRI THỨC TOÀN DIỆN (EDA)
+# 5. KHÁM PHÁ DỮ LIỆU (EDA)
 # ============================================================
-add_md(r"""## 5. KHÁM PHÁ DỮ LIỆU & ĐỒ THỊ TRI THỨC TOÀN DIỆN (EXPLORATORY DATA ANALYSIS - EDA)
+add_md(r"""## 5. Khám phá dữ liệu (EDA)
 
-Trước khi tiến hành huấn luyện các mô hình, việc **Khám phá Dữ liệu (EDA)** là bước bắt buộc trong nghiên cứu khoa học nhằm trả lời 3 câu hỏi cốt lõi:
-1. **Mức độ thưa thớt của ma trận tương tác (Sparsity)**: Không gian dữ liệu rỗng đến mức nào? Liệu các phương pháp lọc cộng tác truyền thống có đủ thông tin để học không?
-2. **Hiện tượng Đuôi dài (Long-tail Popularity)**: Tương tác có bị lệch nghiêm trọng về các sản phẩm phổ biến (Power-law distribution) không?
-3. **Cấu trúc Đồ thị Tri thức (KG Topology)**: Đồ thị có bao nhiêu loại quan hệ? Bậc kết nối của các thực thể phân bố như thế nào và có xuất hiện các nút giao lớn (Hub entities) không?
+Phần này phân tích các đặc trưng của 3 tập dữ liệu trước khi huấn luyện mô hình:
+1. **Độ thưa (Sparsity)**: Tỉ lệ ô trống trong ma trận User - Item.
+2. **Phân bố tương tác (Long-tail)**: Nhóm item phổ biến chiếm bao nhiêu % lượng tương tác (nguyên lý Pareto 80/20).
+3. **Đặc trưng người dùng (User Activity & Cold-start)**: Tỉ lệ user có ít hơn hoặc bằng 5 tương tác.
+4. **Cấu trúc Knowledge Graph**: Số lượng entity, quan hệ, triple và phân bố bậc kết nối.
+
+Tất cả bảng thống kê (CSV) và các biểu đồ (PNG) sẽ được lưu tự động vào thư mục `./outputs/`.
 """)
 
 add_code(r"""# ============================================================
-# 5.1. BẢNG THỐNG KÊ TOÀN DIỆN CÁC ĐẶC TÍNH DỮ LIỆU (EDA METRICS)
+# 5.1. BẢNG THỐNG KÊ ĐẶC TRƯNG DỮ LIỆU (EDA SUMMARY)
 # ============================================================
-from collections import Counter
-
 eda_summary = []
 
 for ds in active_datasets:
@@ -399,21 +379,21 @@ for ds in active_datasets:
     n_items = len(np.unique(r_data[:, 1]))
     n_ratings = len(r_data)
     
-    # 1. Độ thưa thớt của ma trận tương tác User - Item
+    # 1. Độ thưa của ma trận tương tác
     sparsity = (1.0 - n_ratings / (n_users * n_items)) * 100
     
-    # 2. Phân phối tương tác theo người dùng
+    # 2. Phân phối tương tác theo user
     user_counts = list(Counter(r_data[:, 0]).values())
     avg_u_inter = float(np.mean(user_counts))
     med_u_inter = float(np.median(user_counts))
     cold_start_users = sum(1 for c in user_counts if c <= 5) / n_users * 100
     
-    # 3. Phân phối tương tác theo sản phẩm & Định luật Pareto (Top 20% items chiếm bao nhiêu % tương tác)
+    # 3. Phân phối tương tác theo item & Pareto (Top 20% item chiếm bao nhiêu % tương tác)
     item_counts = sorted(list(Counter(r_data[:, 1]).values()), reverse=True)
     cum_inter = np.cumsum(item_counts) / n_ratings * 100
     top20_share = cum_inter[min(int(0.2 * len(item_counts)), len(cum_inter) - 1)]
     
-    # 4. Đặc tính Đồ thị Tri thức (Knowledge Graph Topology)
+    # 4. Đặc tính Knowledge Graph
     all_entities = np.unique(np.concatenate([k_data[:, 0], k_data[:, 2]]))
     n_entities = len(all_entities)
     n_relations = len(np.unique(k_data[:, 1]))
@@ -436,14 +416,18 @@ for ds in active_datasets:
     })
 
 df_eda = pd.DataFrame(eda_summary)
+os.makedirs("./outputs", exist_ok=True)
+df_eda.to_csv("./outputs/eda_summary.csv", index=False)
+
 print("="*85)
-print("BẢNG TỔNG HỢP CHỈ SỐ KHÁM PHÁ DỮ LIỆU & ĐỒ THỊ TRI THỨC (EDA SUMMARY TABLE):")
+print("BẢNG THỐNG KÊ ĐẶC TÍNH DỮ LIỆU & KNOWLEDGE GRAPH (EDA SUMMARY):")
 print("="*85)
 print(df_eda.to_string(index=False))
+print("\n[OK] Đã lưu file bảng số liệu vào: ./outputs/eda_summary.csv")
 """)
 
 add_code(r"""# ============================================================
-# 5.2. DASHBOARD TRỰC QUAN HÓA KHÁM PHÁ DỮ LIỆU (EDA VISUALIZATION)
+# 5.2. TRỰC QUAN HÓA EDA VÀ LƯU HÌNH ẢNH RA FILE
 # ============================================================
 sample_ds = active_datasets[0]
 r_sample = np.load(f"./data/{sample_ds}/ratings_final.npy")
@@ -454,100 +438,157 @@ i_dist = sorted(list(Counter(r_sample[:, 1]).values()), reverse=True)
 rel_dist = Counter(k_sample[:, 1]).most_common(10)
 head_dist = list(Counter(k_sample[:, 0]).values())
 
-fig, axes = plt.subplots(2, 2, figsize=(15, 11), dpi=300)
+os.makedirs("./outputs", exist_ok=True)
 
-# --- 1. LONG-TAIL DISTRIBUTION OF ITEM POPULARITY ---
-axes[0, 0].plot(range(len(i_dist)), i_dist, color="#D97706", lw=2.5, label="Độ phổ biến sản phẩm")
-axes[0, 0].fill_between(range(len(i_dist)), i_dist, color="#FDE68A", alpha=0.5)
+# --- 1. LƯU TỪNG HÌNH ĐƠN LẺ ĐỂ TIỆN DÙNG CHO BÁO CÁO / SLIDE ---
+
+# Hình 1: Long-Tail Item Popularity
+fig_lt, ax_lt = plt.subplots(figsize=(7, 4.5), dpi=300)
+ax_lt.plot(range(len(i_dist)), i_dist, color="#D97706", lw=2.5, label="Lượt tương tác của Item")
+ax_lt.fill_between(range(len(i_dist)), i_dist, color="#FDE68A", alpha=0.5)
 p20_idx = int(0.2 * len(i_dist))
-axes[0, 0].axvline(p20_idx, color="#DC2626", linestyle="--", lw=1.5, label=f"Top 20% Items (Chiếm {df_eda.loc[0, 'Top20%_Item_Share (%)']}%)")
-axes[0, 0].set_title(f"1. Phân Phối Đuôi Dài (Long-Tail Popularity) - {sample_ds.upper()}", fontsize=11, fontweight="bold")
-axes[0, 0].set_xlabel("Thứ hạng sản phẩm (Xếp từ phổ biến nhất đến ngách nhất)")
-axes[0, 0].set_ylabel("Số lượt tương tác ghi nhận")
-axes[0, 0].legend(loc="upper right")
-axes[0, 0].grid(axis="both", linestyle=":", alpha=0.6)
+ax_lt.axvline(p20_idx, color="#DC2626", linestyle="--", lw=1.5, label=f"Top 20% Items (Chiếm {df_eda.loc[0, 'Top20%_Item_Share (%)']}%)")
+ax_lt.set_title(f"1. Phân phối Long-Tail ({sample_ds.upper()})", fontsize=11, fontweight="bold")
+ax_lt.set_xlabel("Thứ hạng sản phẩm (từ phổ biến đến ngách)")
+ax_lt.set_ylabel("Số lượt tương tác")
+ax_lt.legend(loc="upper right")
+ax_lt.grid(axis="both", linestyle=":", alpha=0.6)
+fig_lt.tight_layout()
+fig_lt.savefig("./outputs/eda_1_long_tail.png")
+plt.close(fig_lt)
 
-# --- 2. USER ACTIVITY DISTRIBUTION ---
-axes[0, 1].hist(u_dist, bins=35, color="#3B82F6", edgecolor="white", alpha=0.85)
-axes[0, 1].axvline(np.median(u_dist), color="#1E3A8A", linestyle="--", lw=2, label=f"Trung vị: {int(np.median(u_dist))} tương tác")
-axes[0, 1].set_title(f"2. Phân Phối Tần Suất Hoạt Động Người Dùng - {sample_ds.upper()}", fontsize=11, fontweight="bold")
-axes[0, 1].set_xlabel("Số lượng tương tác / người dùng")
-axes[0, 1].set_ylabel("Số lượng người dùng")
-axes[0, 1].legend(loc="upper right")
-axes[0, 1].grid(axis="both", linestyle=":", alpha=0.6)
+# Hình 2: User Activity Distribution
+fig_ua, ax_ua = plt.subplots(figsize=(7, 4.5), dpi=300)
+ax_ua.hist(u_dist, bins=35, color="#3B82F6", edgecolor="white", alpha=0.85)
+ax_ua.axvline(np.median(u_dist), color="#1E3A8A", linestyle="--", lw=2, label=f"Trung vị: {int(np.median(u_dist))} tương tác")
+ax_ua.set_title(f"2. Phân phối tương tác theo User ({sample_ds.upper()})", fontsize=11, fontweight="bold")
+ax_ua.set_xlabel("Số lượng tương tác / user")
+ax_ua.set_ylabel("Số lượng user")
+ax_ua.legend(loc="upper right")
+ax_ua.grid(axis="both", linestyle=":", alpha=0.6)
+fig_ua.tight_layout()
+fig_ua.savefig("./outputs/eda_2_user_activity.png")
+plt.close(fig_ua)
 
-# --- 3. TOP KNOWLEDGE GRAPH RELATIONS FREQUENCY ---
+# Hình 3: Top KG Relations
 rel_labels = [f"Quan hệ #{r[0]}" for r in rel_dist]
 rel_vals = [r[1] for r in rel_dist]
-axes[1, 0].barh(rel_labels[::-1], rel_vals[::-1], color="#10B981", edgecolor="#047857", height=0.65)
-axes[1, 0].set_title(f"3. Top 10 Loại Quan Hệ Phổ Biến Trong KG - {sample_ds.upper()}", fontsize=11, fontweight="bold")
-axes[1, 0].set_xlabel("Số lượng bộ ba (Triples)")
-axes[1, 0].grid(axis="x", linestyle=":", alpha=0.6)
+fig_rel, ax_rel = plt.subplots(figsize=(7, 4.5), dpi=300)
+ax_rel.barh(rel_labels[::-1], rel_vals[::-1], color="#10B981", edgecolor="#047857", height=0.65)
+ax_rel.set_title(f"3. Top 10 quan hệ phổ biến trong KG ({sample_ds.upper()})", fontsize=11, fontweight="bold")
+ax_rel.set_xlabel("Số lượng bộ ba (Triples)")
+ax_rel.grid(axis="x", linestyle=":", alpha=0.6)
+fig_rel.tight_layout()
+fig_rel.savefig("./outputs/eda_3_kg_relations.png")
+plt.close(fig_rel)
 
-# --- 4. SCALE-FREE ENTITY DEGREE DISTRIBUTION (LOG-LOG PLOT) ---
+# Hình 4: Scale-Free Entity Degree (Log-Log)
 deg_counts = Counter(head_dist)
 degs = sorted(deg_counts.keys())
 freqs = [deg_counts[d] for d in degs]
+fig_deg, ax_deg = plt.subplots(figsize=(7, 4.5), dpi=300)
+ax_deg.scatter(degs, freqs, color="#8B5CF6", alpha=0.75, s=30, edgecolors="#6D28D9")
+ax_deg.set_xscale("log")
+ax_deg.set_yscale("log")
+ax_deg.set_title(f"4. Bậc kết nối thực thể - Log-Log Plot ({sample_ds.upper()})", fontsize=11, fontweight="bold")
+ax_deg.set_xlabel("Bậc kết nối out-degree (Log)")
+ax_deg.set_ylabel("Số lượng thực thể (Log)")
+ax_deg.grid(axis="both", linestyle=":", alpha=0.6)
+fig_deg.tight_layout()
+fig_deg.savefig("./outputs/eda_4_scale_free.png")
+plt.close(fig_deg)
+
+# --- 2. VẼ VÀ HIỂN THỊ DASHBOARD TỔNG HỢP 4 TRONG 1 ---
+fig, axes = plt.subplots(2, 2, figsize=(15, 11), dpi=300)
+
+axes[0, 0].plot(range(len(i_dist)), i_dist, color="#D97706", lw=2.5, label="Độ phổ biến sản phẩm")
+axes[0, 0].fill_between(range(len(i_dist)), i_dist, color="#FDE68A", alpha=0.5)
+axes[0, 0].axvline(p20_idx, color="#DC2626", linestyle="--", lw=1.5, label=f"Top 20% Items ({df_eda.loc[0, 'Top20%_Item_Share (%)']}%)")
+axes[0, 0].set_title(f"1. Phân Phối Đuôi Dài (Long-Tail) - {sample_ds.upper()}", fontsize=11, fontweight="bold")
+axes[0, 0].set_xlabel("Thứ hạng sản phẩm")
+axes[0, 0].set_ylabel("Số lượt tương tác")
+axes[0, 0].legend(loc="upper right")
+axes[0, 0].grid(axis="both", linestyle=":", alpha=0.6)
+
+axes[0, 1].hist(u_dist, bins=35, color="#3B82F6", edgecolor="white", alpha=0.85)
+axes[0, 1].axvline(np.median(u_dist), color="#1E3A8A", linestyle="--", lw=2, label=f"Trung vị: {int(np.median(u_dist))}")
+axes[0, 1].set_title(f"2. Tần Suất Hoạt Động Của User - {sample_ds.upper()}", fontsize=11, fontweight="bold")
+axes[0, 1].set_xlabel("Số tương tác / user")
+axes[0, 1].set_ylabel("Số lượng user")
+axes[0, 1].legend(loc="upper right")
+axes[0, 1].grid(axis="both", linestyle=":", alpha=0.6)
+
+axes[1, 0].barh(rel_labels[::-1], rel_vals[::-1], color="#10B981", edgecolor="#047857", height=0.65)
+axes[1, 0].set_title(f"3. Top 10 Quan Hệ Trong KG - {sample_ds.upper()}", fontsize=11, fontweight="bold")
+axes[1, 0].set_xlabel("Số lượng triples")
+axes[1, 0].grid(axis="x", linestyle=":", alpha=0.6)
+
 axes[1, 1].scatter(degs, freqs, color="#8B5CF6", alpha=0.75, s=30, edgecolors="#6D28D9")
 axes[1, 1].set_xscale("log")
 axes[1, 1].set_yscale("log")
-axes[1, 1].set_title(f"4. Bậc Kết Nối Thực Thể (Scale-Free Log-Log Plot) - {sample_ds.upper()}", fontsize=11, fontweight="bold")
-axes[1, 1].set_xlabel("Bậc kết nối thực thể (Out-degree - Log Scale)")
-axes[1, 1].set_ylabel("Số lượng thực thể (Count - Log Scale)")
+axes[1, 1].set_title(f"4. Bậc Kết Nối Thực Thể (Log-Log) - {sample_ds.upper()}", fontsize=11, fontweight="bold")
+axes[1, 1].set_xlabel("Bậc kết nối (Log)")
+axes[1, 1].set_ylabel("Số thực thể (Log)")
 axes[1, 1].grid(axis="both", linestyle=":", alpha=0.6)
 
-fig.suptitle(f"BẢNG ĐIỀU KHIỂN KHÁM PHÁ DỮ LIỆU & ĐỒ THỊ TRI THỨC (EDA DASHBOARD): {sample_ds.upper()}",
+fig.suptitle(f"DASHBOARD KHÁM PHÁ DỮ LIỆU & ĐỒ THỊ TRI THỨC (EDA): {sample_ds.upper()}",
              fontsize=13, fontweight="bold", y=0.99)
 plt.tight_layout()
+plt.savefig("./outputs/eda_dashboard.png", bbox_inches="tight")
 plt.savefig("./eda_visualization_dashboard.png", bbox_inches="tight")
 plt.show()
 
-print("[OK] Đã hoàn thành trực quan hóa phân tích khám phá dữ liệu (EDA)!")
+print("[OK] Đã lưu 4 file ảnh riêng lẻ và 1 ảnh dashboard tổng hợp vào ./outputs/:")
+print("  • ./outputs/eda_1_long_tail.png")
+print("  • ./outputs/eda_2_user_activity.png")
+print("  • ./outputs/eda_3_kg_relations.png")
+print("  • ./outputs/eda_4_scale_free.png")
+print("  • ./outputs/eda_dashboard.png")
 """)
 
-add_md(r"""### 5.3. NHẬN XÉT & ĐỘNG LỰC THIẾT KẾ MÔ HÌNH TỪ KẾT QUẢ EDA:
-1. **Độ thưa thớt cực đoan ($>99.4\%$)**:
-   - Ma trận tương tác hầu như toàn ô rỗng. Các mô hình lọc cộng tác truyền thống (CF/MF) chỉ dựa vào dữ liệu tương tác nội sinh sẽ bị hiện tượng "đói dữ liệu" (Data Starvation). Đây là bằng chứng khoa học rõ ràng nhất giải thích vì sao cần bổ sung nguồn tri thức ngoại sinh từ Đồ thị Tri thức.
-2. **Hiện tượng Đuôi dài (Long-Tail Popularity)**:
-   - Phần lớn tương tác dồn vào nhóm sản phẩm đầu bảng, trong khi phần lớn sản phẩm còn lại nằm ở vùng đuôi dài và ít người tương tác. Đồ thị tri thức đóng vai trò là "cầu nối ngữ nghĩa" giúp hệ thống khám phá các sản phẩm ở vùng đuôi dài thông qua các thuộc tính liên quan (thể loại, đạo diễn, tác giả).
-3. **Cấu trúc Scale-Free của Đồ thị Tri thức**:
-   - Biểu đồ Log-Log (Hình 4) có dạng tuyến tính dốc xuống, chứng minh Đồ thị Tri thức tuân theo phân phối hàm mũ (Power-law / Scale-free network). Đồ thị tồn tại các "thực thể trung tâm" (Hub entities) có bậc kết nối lên đến hàng nghìn liên kết.
-   - **Động lực kỹ thuật**: Nếu lan truyền toàn bộ đồ thị sẽ gây bùng nổ tổ hợp và tràn bộ nhớ GPU. Do đó, mô hình CKAN bắt buộc phải sử dụng chiến lược **lấy mẫu kích thước cố định (Fixed-size Ripple Sampling)** với `itss = 64` và `utss = 32`.
+add_md(r"""### 5.3. Nhận xét thực tế từ kết quả EDA:
+1. **Độ thưa rất cao (>99.4%)**:
+   - Ma trận tương tác hầu hết là ô trống. Các thuật toán lọc cộng tác truyền thống (CF/MF) chỉ dựa vào dữ liệu tương tác nội sinh nên rất dễ bị thiếu dữ liệu học. Vì vậy việc bổ sung thêm Knowledge Graph là cần thiết.
+2. **Hiện tượng đuôi dài (Long-tail)**:
+   - Phần lớn tương tác dồn vào 20% item phổ biến nhất. Đồ thị tri thức đóng vai trò kết nối các item ít tương tác ở vùng đuôi với người dùng thông qua các thuộc tính chung (thể loại, đạo diễn, tác giả).
+3. **Phân bố bậc của KG**:
+   - Biểu đồ Log-Log dốc xuống chứng minh đồ thị tri thức có một số entity trung tâm (hub) có tới hàng nghìn liên kết. Nếu không lấy mẫu cố định mà duyệt toàn bộ láng giềng thì sẽ tràn bộ nhớ RAM/VRAM. Do đó CKAN dùng cơ chế lấy mẫu kích thước cố định (`itss = 64`, `utss = 32`).
 """)
 
 # ============================================================
-# PHẦN A: CÁC MÔ HÌNH CƠ SỞ (BASELINES DÙNG THƯ VIỆN CHUẨN)
+# PHẦN A: CÁC MÔ HÌNH BASELINE
 # ============================================================
-add_md(r"""## PHẦN A: CÁC MÔ HÌNH CƠ SỞ (BASELINES - SỬ DỤNG THƯ VIỆN CHUẨN)
+add_md(r"""## PHẦN A: CÁC MÔ HÌNH BASELINE (MostPopular, Item-KNN, Matrix Factorization)
 
-Để code tinh gọn và tập trung nghiên cứu sâu vào CKAN, các mô hình cơ sở được triển khai nhanh chóng thông qua các thư viện tiêu chuẩn của Python (`scikit-learn`, `scipy.sparse`, và PyTorch gọn nhẹ):
-
-1. **MostPopular**: Gợi ý theo tần suất tương tác toàn cục (dùng `numpy.bincount`).
-2. **Item-KNN**: Lọc cộng tác dựa trên độ tương đồng Cosine giữa các Item (dùng `sklearn.neighbors.NearestNeighbors` và ma trận thưa `scipy.sparse.csr_matrix`).
-3. **Biased Matrix Factorization (MF)**: Lọc cộng tác nhân tố ẩn với bias người dùng và bias sản phẩm (tối ưu BCE Loss).
+Phần này triển khai 3 baseline cơ bản bằng các thư viện chuẩn (`scikit-learn`, `scipy`, `PyTorch`):
+1. **MostPopular**: Gợi ý dựa trên tần suất xuất hiện toàn cục của item.
+2. **Item-KNN**: Thuật toán láng giềng gần nhất theo độ đo Cosine dùng `NearestNeighbors` và ma trận thưa `scipy.sparse.csr_matrix`.
+3. **Matrix Factorization (MF)**: Phân rã ma trận người dùng - sản phẩm viết bằng PyTorch tối giản.
 """)
 
 add_code(r"""# ============================================================
-# PHẦN A: CÁC MÔ HÌNH CƠ SỞ (BASELINES DÙNG SCIKIT-LEARN & SCIPY)
+# CÀI ĐẶT 3 MÔ HÌNH BASELINE
 # ============================================================
-import torch.nn as nn
-from sklearn.neighbors import NearestNeighbors
-from scipy.sparse import csr_matrix
 
-# --- 1. MOST POPULAR (Không cá nhân hóa, dựa trên tần suất tương tác) ---
+# --- 1. MOST POPULAR BASELINE ---
 class MostPopularBaseline:
+    def __init__(self):
+        self.item_scores = defaultdict(float)
+
     def fit(self, train_data, n_items):
         pos = train_data[train_data[:, 2] == 1]
-        counts = np.bincount(pos[:, 1], minlength=n_items)
-        self.scores = counts / (counts.max() + 1e-9)
+        counts = Counter(pos[:, 1])
+        max_c = max(counts.values()) if counts else 1.0
+        for i in range(n_items):
+            self.item_scores[i] = counts.get(i, 0) / max_c
 
-    def predict(self, items):
-        return self.scores[items]
+    def predict(self, users, items):
+        return np.array([self.item_scores.get(int(i), 0.0) for i in items])
 
-    def score_all_items(self, u):
-        return self.scores.copy()
+    def score_all_items(self, u, n_items):
+        return np.array([self.item_scores.get(i, 0.0) for i in range(n_items)])
 
-# --- 2. ITEM-KNN (Lọc cộng tác dùng sklearn NearestNeighbors) ---
+# --- 2. ITEM-KNN BASELINE (sklearn NearestNeighbors + csr_matrix) ---
 class ItemKNNBaseline:
     def __init__(self, k=20):
         self.k = k
@@ -555,7 +596,6 @@ class ItemKNNBaseline:
 
     def fit(self, train_data, n_users, n_items):
         pos = train_data[train_data[:, 2] == 1]
-        # Ma trận thưa Item - User (kích thước: n_items x n_users)
         self.mat = csr_matrix((np.ones(len(pos)), (pos[:, 1], pos[:, 0])), shape=(n_items, n_users))
         self.model.fit(self.mat)
         self.user_history = defaultdict(set)
@@ -575,7 +615,7 @@ class ItemKNNBaseline:
             scores.append(float(np.mean(matched)) if matched else 0.5)
         return np.array(scores)
 
-# --- 3. BIASED MATRIX FACTORIZATION (PyTorch Latent Factor Model) ---
+# --- 3. MATRIX FACTORIZATION (PyTorch Latent Factor Model) ---
 class MatrixFactorizationBaseline(nn.Module):
     def __init__(self, n_user, n_item, dim=64):
         super().__init__()
@@ -593,50 +633,44 @@ class MatrixFactorizationBaseline(nn.Module):
         return torch.sigmoid((dot + self.user_bias(users) + self.item_bias(items)).squeeze(-1))
 
     def score_all_items(self, u, device):
-        # Tính toán điểm cho toàn bộ sản phẩm bằng phép nhân ma trận trên GPU
         u_t = torch.LongTensor([u]).to(device)
         u_e = self.user_emb(u_t)
         u_b = self.user_bias(u_t).squeeze(-1)
         dots = torch.matmul(u_e, self.item_emb.weight.T).squeeze(0) + u_b + self.item_bias.weight.squeeze(-1)
         return dots.detach().cpu().numpy()
 
-print("[OK] Đã hoàn tất cài đặt 3 mô hình Baseline tinh gọn!")
+print("[OK] Đã hoàn tất cài đặt 3 mô hình Baseline!")
 """)
 
 # ============================================================
-# PHẦN B: TRIỂN KHAI CHI TIẾT MÔ HÌNH CKAN (TRỌNG TÂM ĐỀ TÀI)
+# PHẦN B: TRIỂN KHAI CHI TIẾT MÔ HÌNH CKAN
 # ============================================================
-add_md(r"""## PHẦN B: TRIỂN KHAI CHI TIẾT MÔ HÌNH CKAN (COLLABORATIVE KNOWLEDGE-AWARE ATTENTIVE NETWORK)
+add_md(r"""## PHẦN B: CÁC MODULE CỦA MÔ HÌNH CKAN
 
-Đây là **trọng tâm cốt lõi của đề tài nghiên cứu**. Mô hình CKAN được thiết kế theo hướng module hóa hoàn chỉnh, bao gồm 6 thành phần kiến trúc chi tiết:
-
-1. **`KnowledgeRippleSampler`**: Thuật toán lấy mẫu tập gợn sóng tri thức (Ripple Sets) đa tầng hop-by-hop từ đồ thị tri thức cho cả nhánh User và nhánh Item.
-2. **`KnowledgeAwareAttentionLayer`**: Mạng nơ-ron đa tầng (MLP) tính toán trọng số quan tâm chú ý ngữ nghĩa giữa thực thể đầu và loại quan hệ.
-3. **`MultiLayerAggregator`**: Bộ tổng hợp đặc trưng vector qua $L$ tầng lan truyền (Concat / Sum / Pool).
-4. **`CKANModel`**: Kiến trúc mạng toàn diện kết hợp hai nhánh Collaborative User & Semantic Item.
-5. **`CKANTrainer`**: Quản lý vòng lặp huấn luyện, tối ưu hàm mất mát Binary Cross-Entropy và tính toán các độ đo CTR (AUC, F1, Accuracy).
-6. **`TopKRecommenderEvaluator`**: Bộ đánh giá xếp hạng danh sách thực tế trên toàn kho sản phẩm (Recall@K, NDCG@K, Precision@K).
+Mô hình CKAN được chia thành 6 module độc lập:
+1. **`KnowledgeRippleSampler`**: Lấy mẫu láng giềng (Ripple Sets) trên đồ thị tri thức qua $L$ tầng cho cả User và Item.
+2. **`KnowledgeAwareAttentionLayer`**: Tính trọng số chú ý giữa relation và thực thể.
+3. **`CKANAggregator`**: Gom thông tin láng giềng lại với node gốc (hỗ trợ Concat / Sum / Neighbor).
+4. **`CKAN`**: Mạng tổng hợp kết hợp hai nhánh Collaborative User và Semantic Item.
+5. **`CKANTrainer`**: Huấn luyện mô hình với Binary Cross-Entropy loss và L2 regularization.
+6. **`TopKRecommenderEvaluator`**: Đánh giá xếp hạng Top-K (Recall@K, NDCG@K, Precision@K) tối ưu tính toán trên GPU.
 """)
 
 # B1: Ripple Sampler
 add_code(r"""# ============================================================
-# B1. KNOWLEDGE RIPPLE SAMPLER (LẤY MẪU TẬP GỢN SÓNG TRI THỨC)
+# B1. KNOWLEDGE RIPPLE SAMPLER (LẤY MẪU LÁNG GIỀNG TRÊN ĐỒ THỊ)
 # ============================================================
 class KnowledgeRippleSampler:
-    # Thuật toán trích xuất và lấy mẫu cố định kích thước (Fixed-size Sampling)
-    # cho các bộ ba tri thức (h, r, t) qua L bước nhảy (hops).
     def __init__(self, kg_np, n_layer=1, itss=64, utss=32):
         self.n_layer = n_layer
         self.itss = itss
         self.utss = utss
         
-        # Xây dựng danh sách kề của Đồ thị Tri thức: head -> list of (tail, relation)
         self.kg_dict = defaultdict(list)
         for h, r, t in kg_np:
             self.kg_dict[int(h)].append((int(t), int(r)))
 
     def build_item_ripple_set(self, n_items):
-        # Khởi tạo tập gợn sóng cho từng sản phẩm ứng viên qua L tầng
         item_triple_set = defaultdict(list)
         for it in range(n_items):
             for l in range(self.n_layer):
@@ -652,116 +686,91 @@ class KnowledgeRippleSampler:
                 item_triple_set[it].append((h, r, t))
         return item_triple_set
 
-    def build_user_ripple_set(self, n_users, user_pos_dict):
-        # Lan truyền sở thích của người dùng từ các sản phẩm đã thích ra thực thể láng giềng
+    def build_user_ripple_set(self, user_history_dict):
         user_triple_set = defaultdict(list)
-        for u in range(n_users):
-            liked = user_pos_dict.get(u, [0])
-            entities = liked
+        for u, history in user_history_dict.items():
+            current_heads = list(history)
             for l in range(self.n_layer):
-                h, r, t = [], [], []
-                for ent in entities:
-                    for tail, rel in self.kg_dict.get(ent, []):
-                        h.append(ent)
-                        r.append(rel)
-                        t.append(tail)
-                if len(h) == 0:
-                    user_triple_set[u].append(([liked[0]] * self.utss, [0] * self.utss, [liked[0]] * self.utss))
+                h_list, r_list, t_list = [], [], []
+                for h in current_heads:
+                    for t, r in self.kg_dict.get(h, []):
+                        h_list.append(h); r_list.append(r); t_list.append(t)
+                if len(h_list) == 0:
+                    fallback_h = list(history)[0] if len(history) > 0 else 0
+                    h, r, t = [fallback_h] * self.utss, [0] * self.utss, [fallback_h] * self.utss
                 else:
-                    replace = len(h) < self.utss
-                    choice = np.random.choice(len(h), size=self.utss, replace=replace)
-                    user_triple_set[u].append(([h[c] for c in choice], [r[c] for c in choice], [t[c] for c in choice]))
-                    entities = [t[c] for c in choice]
+                    replace = len(h_list) < self.utss
+                    choice = np.random.choice(len(h_list), size=self.utss, replace=replace)
+                    h = [h_list[c] for c in choice]
+                    r = [r_list[c] for c in choice]
+                    t = [t_list[c] for c in choice]
+                user_triple_set[u].append((h, r, t))
+                current_heads = t
         return user_triple_set
 
-def to_triple_tensor(ids, triple_set, n_layer, device):
-    # Chuyển đổi danh sách bộ ba đã lấy mẫu thành PyTorch LongTensor trên GPU
-    h_list, r_list, t_list = [], [], []
-    for l in range(n_layer):
-        h_list.append(torch.LongTensor([triple_set[i][l][0] for i in ids]).to(device))
-        r_list.append(torch.LongTensor([triple_set[i][l][1] for i in ids]).to(device))
-        t_list.append(torch.LongTensor([triple_set[i][l][2] for i in ids]).to(device))
-    return [h_list, r_list, t_list]
-
-print("[OK] Đã hoàn thành Mô-đun B1: KnowledgeRippleSampler!")
+print("[OK] Mô-đun B1: KnowledgeRippleSampler đã sẵn sàng!")
 """)
 
-# B2: Knowledge-Aware Attention Layer
+# B2: Attention Layer
 add_code(r"""# ============================================================
-# B2. KNOWLEDGE-AWARE ATTENTION LAYER (MÔ-ĐUN CHÚ Ý TRI THỨC)
+# B2. KNOWLEDGE-AWARE ATTENTION LAYER
 # ============================================================
-import torch.nn.functional as F
-
-class KnowledgeAwareAttention(nn.Module):
-    # Cơ chế Chú ý Tri thức (Knowledge-aware Attention):
-    # Đo lường mức độ quan trọng của quan hệ r đối với thực thể đầu h
-    # s = Sigmoid( W2 * ReLU( W1 * [e_h || e_r] ) )
-    # alpha = Softmax(s)
-    # e_out = sum( alpha_i * e_t_i )
+class KnowledgeAwareAttentionLayer(nn.Module):
     def __init__(self, dim):
         super().__init__()
         self.dim = dim
         self.mlp = nn.Sequential(
-            nn.Linear(dim * 2, dim, bias=False),
+            nn.Linear(dim * 2, dim),
             nn.ReLU(),
-            nn.Linear(dim, dim, bias=False),
-            nn.ReLU(),
-            nn.Linear(dim, 1, bias=False)
+            nn.Linear(dim, 1)
         )
-        self._init_weights()
 
-    def _init_weights(self):
-        for m in self.mlp:
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
+    def forward(self, head_emb, rel_emb, tail_emb):
+        # head_emb: [batch_size, n_samples, dim]
+        # rel_emb : [batch_size, n_samples, dim]
+        # tail_emb: [batch_size, n_samples, dim]
+        hr_concat = torch.cat([head_emb, rel_emb], dim=-1)
+        scores = self.mlp(hr_concat).squeeze(-1)
+        attn_weights = F.softmax(scores, dim=-1).unsqueeze(-1)
+        context_vec = (attn_weights * tail_emb).sum(dim=1)
+        return context_vec, attn_weights
 
-    def forward(self, h_emb, r_emb, t_emb):
-        # h_emb, r_emb, t_emb: [batch_size, n_triples, dim]
-        cat_hr = torch.cat((h_emb, r_emb), dim=-1)             # [batch_size, n_triples, 2*dim]
-        scores = self.mlp(cat_hr).squeeze(-1)                  # [batch_size, n_triples]
-        alpha = F.softmax(scores, dim=-1)                      # [batch_size, n_triples]
-        output = torch.mul(alpha.unsqueeze(-1), t_emb).sum(dim=1) # [batch_size, dim]
-        return output
-
-print("[OK] Đã hoàn thành Mô-đun B2: KnowledgeAwareAttention!")
+print("[OK] Mô-đun B2: KnowledgeAwareAttentionLayer đã sẵn sàng!")
 """)
 
-# B3: MultiLayer Aggregator
+# B3: Aggregator
 add_code(r"""# ============================================================
-# B3. MULTI-LAYER AGGREGATOR (BỘ TỔNG HỢP ĐẶC TRƯNG ĐA TẦNG)
+# B3. INFORMATION AGGREGATOR LAYER
 # ============================================================
-class MultiLayerAggregator(nn.Module):
-    # Bộ tổng hợp biểu diễn vector qua các bước nhảy L-hop:
-    # - concat: Ghép nối vector gốc và tri thức lan truyền [e^0 || e^1 || ... || e^L] (Tối ưu nhất)
-    # - sum   : Cộng dồn các vector e^0 + e^1 + ... + e^L
-    # - mean  : Lấy trung bình cộng các vector
-    def __init__(self, mode="concat"):
+class CKANAggregator(nn.Module):
+    def __init__(self, dim, agg_type="concat"):
         super().__init__()
-        self.mode = mode
+        self.dim = dim
+        self.agg_type = agg_type
+        if agg_type == "concat":
+            self.linear = nn.Linear(dim * 2, dim)
+        elif agg_type == "sum":
+            self.linear = nn.Linear(dim, dim)
+        elif agg_type == "neighbor":
+            self.linear = nn.Linear(dim, dim)
 
-    def forward(self, embs):
-        # embs: list of L+1 tensors, mỗi tensor có shape [batch_size, dim]
-        if self.mode == "concat":
-            return torch.cat(embs, dim=-1)
-        elif self.mode == "sum":
-            return torch.stack(embs, dim=0).sum(dim=0)
-        elif self.mode == "mean":
-            return torch.stack(embs, dim=0).mean(dim=0)
-        else:
-            raise ValueError(f"Không hỗ trợ chế độ aggregator: {self.mode}")
+    def forward(self, self_vec, neighbor_vec):
+        if self.agg_type == "concat":
+            combined = torch.cat([self_vec, neighbor_vec], dim=-1)
+            return F.relu(self.linear(combined))
+        elif self.agg_type == "sum":
+            return F.relu(self.linear(self_vec + neighbor_vec))
+        elif self.agg_type == "neighbor":
+            return F.relu(self.linear(neighbor_vec))
 
-print("[OK] Đã hoàn thành Mô-đun B3: MultiLayerAggregator!")
+print("[OK] Mô-đun B3: CKANAggregator đã sẵn sàng!")
 """)
 
-# B4: Full CKAN Model
+# B4: Model
 add_code(r"""# ============================================================
-# B4. MÔ HÌNH CKAN (COLLABORATIVE KNOWLEDGE-AWARE ATTENTIVE NETWORK)
+# B4. MÔ HÌNH CKAN (COLLABORATIVE KNOWLEDGE ATTENTIVE NETWORK)
 # ============================================================
 class CKAN(nn.Module):
-    # Kiến trúc toàn diện của mô hình CKAN:
-    # - Bi-directional Collaborative Propagation (Lan truyền 2 chiều User & Item)
-    # - Knowledge-aware Attention Unit
-    # - Interaction Probability: y_hat = Sigmoid(e_u^T * e_v)
     def __init__(self, n_entity, n_relation, dim=64, n_layer=1, agg="concat"):
         super().__init__()
         self.n_entity = n_entity
@@ -769,284 +778,315 @@ class CKAN(nn.Module):
         self.dim = dim
         self.n_layer = n_layer
         
-        # Ma trận nhúng thực thể và nhúng quan hệ
         self.entity_emb = nn.Embedding(n_entity, dim)
         self.relation_emb = nn.Embedding(n_relation, dim)
         nn.init.xavier_uniform_(self.entity_emb.weight)
         nn.init.xavier_uniform_(self.relation_emb.weight)
         
-        # Đơn vị chú ý tri thức và bộ tổng hợp
-        self.attention = KnowledgeAwareAttention(dim)
-        self.aggregator = MultiLayerAggregator(mode=agg)
+        self.attn_layers = nn.ModuleList([KnowledgeAwareAttentionLayer(dim) for _ in range(n_layer)])
+        self.user_aggs = nn.ModuleList([CKANAggregator(dim, agg) for _ in range(n_layer)])
+        self.item_aggs = nn.ModuleList([CKANAggregator(dim, agg) for _ in range(n_layer)])
 
-    def get_user_embeddings(self, user_triple):
-        # 0-hop: Trung bình các sản phẩm đã tương tác tích cực
-        user_embs = [self.entity_emb(user_triple[0][0]).mean(dim=1)]
+    def _propagate_knowledge(self, root_emb, triple_set, is_user=True):
+        current_rep = root_emb
         for l in range(self.n_layer):
-            h = self.entity_emb(user_triple[0][l])
-            r = self.relation_emb(user_triple[1][l])
-            t = self.entity_emb(user_triple[2][l])
-            user_embs.append(self.attention(h, r, t))
-        return self.aggregator(user_embs)
+            h, r, t = triple_set[l]
+            h_e = self.entity_emb(h)
+            r_e = self.relation_emb(r)
+            t_e = self.entity_emb(t)
+            context, _ = self.attn_layers[l](h_e, r_e, t_e)
+            agg = self.user_aggs[l] if is_user else self.item_aggs[l]
+            current_rep = agg(current_rep, context)
+        return current_rep
 
-    def get_item_embeddings(self, items, item_triple):
-        # 0-hop: Vector nhúng của chính sản phẩm ứng viên
-        item_embs = [self.entity_emb(items)]
-        for l in range(self.n_layer):
-            h = self.entity_emb(item_triple[0][l])
-            r = self.relation_emb(item_triple[1][l])
-            t = self.entity_emb(item_triple[2][l])
-            item_embs.append(self.attention(h, r, t))
-        return self.aggregator(item_embs)
+    def forward(self, items, user_triples, item_triples):
+        it_e = self.entity_emb(items)
+        it_rep = self._propagate_knowledge(it_e, item_triples, is_user=False)
+        u_init = self.entity_emb(user_triples[0][0]).mean(dim=1)
+        u_rep = self._propagate_knowledge(u_init, user_triples, is_user=True)
+        scores = (u_rep * it_rep).sum(dim=-1)
+        return torch.sigmoid(scores)
 
-    def forward(self, items, user_triple, item_triple):
-        e_u = self.get_user_embeddings(user_triple)
-        e_v = self.get_item_embeddings(items, item_triple)
-        return torch.sigmoid((e_u * e_v).sum(dim=-1))
+    def get_item_embeddings(self, item_ids, item_triple_set, device):
+        self.eval()
+        with torch.no_grad():
+            it_tensor = torch.LongTensor(item_ids).to(device)
+            it_e = self.entity_emb(it_tensor)
+            triples = []
+            for l in range(self.n_layer):
+                h = torch.LongTensor([item_triple_set[i][l][0] for i in item_ids]).to(device)
+                r = torch.LongTensor([item_triple_set[i][l][1] for i in item_ids]).to(device)
+                t = torch.LongTensor([item_triple_set[i][l][2] for i in item_ids]).to(device)
+                triples.append((h, r, t))
+            return self._propagate_knowledge(it_e, triples, is_user=False)
 
-print("[OK] Đã hoàn thành Mô-đun B4: Kiến trúc mô hình CKAN!")
+    def get_user_embeddings(self, user_triple_tuples):
+        self.eval()
+        with torch.no_grad():
+            u_init = self.entity_emb(user_triple_tuples[0][0]).mean(dim=1)
+            return self._propagate_knowledge(u_init, user_triple_tuples, is_user=True)
+
+print("[OK] Mô-đun B4: Kiến trúc mô hình CKAN đã hoàn tất!")
 """)
 
-# B5: Trainer & Evaluation Metrics
+# B5: Trainer
 add_code(r"""# ============================================================
-# B5. CKAN TRAINER & HÀM ĐÁNH GIÁ ĐỘ ĐO HỌC THUẬT (CTR PREDICTION)
+# B5. CKAN TRAINER
 # ============================================================
-def evaluate_predictions(labels, scores):
-    # Tính toán ROC-AUC, F1-Score và Accuracy
-    auc = roc_auc_score(labels, scores)
-    preds = [1 if s >= 0.5 else 0 for s in scores]
-    f1 = f1_score(labels, preds)
-    acc = accuracy_score(labels, preds)
-    return auc, f1, acc
-
 class CKANTrainer:
-    # Quản lý huấn luyện và đánh giá mô hình CKAN
-    def __init__(self, model, lr=0.002, weight_decay=1e-5, device="cpu"):
+    def __init__(self, model, lr=0.002, weight_decay=1e-5, device="cuda"):
         self.model = model.to(device)
         self.device = device
-        self.optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr, weight_decay=weight_decay)
         self.criterion = nn.BCELoss()
-        self.loss_history = []
 
-    def train_epoch(self, train_data, user_triple_set, item_triple_set, n_layer, batch_size=1024):
+    def train_epoch(self, train_data, user_triples_dict, item_triples_dict, n_layer, batch_size=2048):
         self.model.train()
-        perm = np.random.permutation(len(train_data))
-        epoch_losses = []
-        for s in range(0, len(train_data), batch_size):
-            b = train_data[perm[s:s+batch_size]]
-            items = torch.LongTensor(b[:, 1]).to(self.device)
-            labels = torch.FloatTensor(b[:, 2]).to(self.device)
-            u_tr = to_triple_tensor(b[:, 0], user_triple_set, n_layer, self.device)
-            i_tr = to_triple_tensor(b[:, 1], item_triple_set, n_layer, self.device)
+        np.random.shuffle(train_data)
+        total_loss = 0.0
+        n_batches = 0
+        
+        for start in range(0, len(train_data), batch_size):
+            batch = train_data[start:start+batch_size]
+            u_batch = batch[:, 0]
+            i_batch = batch[:, 1]
+            labels = torch.FloatTensor(batch[:, 2]).to(self.device)
             
+            u_triples = []
+            i_triples = []
+            for l in range(n_layer):
+                uh = torch.LongTensor([user_triples_dict[u][l][0] for u in u_batch]).to(self.device)
+                ur = torch.LongTensor([user_triples_dict[u][l][1] for u in u_batch]).to(self.device)
+                ut = torch.LongTensor([user_triples_dict[u][l][2] for u in u_batch]).to(self.device)
+                u_triples.append((uh, ur, ut))
+                
+                ih = torch.LongTensor([item_triples_dict[i][l][0] for i in i_batch]).to(self.device)
+                ir = torch.LongTensor([item_triples_dict[i][l][1] for i in i_batch]).to(self.device)
+                it = torch.LongTensor([item_triples_dict[i][l][2] for i in i_batch]).to(self.device)
+                i_triples.append((ih, ir, it))
+                
             self.optimizer.zero_grad()
-            preds = self.model(items, u_tr, i_tr)
+            preds = self.model(torch.LongTensor(i_batch).to(self.device), u_triples, i_triples)
             loss = self.criterion(preds, labels)
             loss.backward()
             self.optimizer.step()
-            epoch_losses.append(loss.item())
-        avg_loss = float(np.mean(epoch_losses))
-        self.loss_history.append(avg_loss)
-        return avg_loss
+            
+            total_loss += loss.item()
+            n_batches += 1
+            
+        return total_loss / max(1, n_batches)
 
-    def evaluate(self, test_data, user_triple_set, item_triple_set, n_layer, batch_size=2048):
+    def evaluate(self, test_data, user_triples_dict, item_triples_dict, n_layer, batch_size=2048):
         self.model.eval()
-        scores = []
+        all_preds = []
         with torch.no_grad():
-            for s in range(0, len(test_data), batch_size):
-                b = test_data[s:s+batch_size]
-                items = torch.LongTensor(b[:, 1]).to(self.device)
-                u_tr = to_triple_tensor(b[:, 0], user_triple_set, n_layer, self.device)
-                i_tr = to_triple_tensor(b[:, 1], item_triple_set, n_layer, self.device)
-                scores.extend(self.model(items, u_tr, i_tr).cpu().numpy())
-        return evaluate_predictions(test_data[:, 2], scores)
+            for start in range(0, len(test_data), batch_size):
+                batch = test_data[start:start+batch_size]
+                u_batch = batch[:, 0]
+                i_batch = batch[:, 1]
+                
+                u_triples = []
+                i_triples = []
+                for l in range(n_layer):
+                    uh = torch.LongTensor([user_triples_dict[u][l][0] for u in u_batch]).to(self.device)
+                    ur = torch.LongTensor([user_triples_dict[u][l][1] for u in u_batch]).to(self.device)
+                    ut = torch.LongTensor([user_triples_dict[u][l][2] for u in u_batch]).to(self.device)
+                    u_triples.append((uh, ur, ut))
+                    
+                    ih = torch.LongTensor([item_triples_dict[i][l][0] for i in i_batch]).to(self.device)
+                    ir = torch.LongTensor([item_triples_dict[i][l][1] for i in i_batch]).to(self.device)
+                    it = torch.LongTensor([item_triples_dict[i][l][2] for i in i_batch]).to(self.device)
+                    i_triples.append((ih, ir, it))
+                    
+                preds = self.model(torch.LongTensor(i_batch).to(self.device), u_triples, i_triples)
+                all_preds.extend(preds.cpu().numpy())
+                
+        all_preds = np.array(all_preds)
+        labels = test_data[:, 2]
+        auc = roc_auc_score(labels, all_preds)
+        f1 = f1_score(labels, (all_preds >= 0.5).astype(int), zero_division=0)
+        acc = accuracy_score(labels, (all_preds >= 0.5).astype(int))
+        return auc, f1, acc
 
-print("[OK] Đã hoàn thành Mô-đun B5: CKANTrainer & Evaluation Metrics!")
+print("[OK] Mô-đun B5: CKANTrainer đã sẵn sàng!")
 """)
 
-# B6: Top-K Ranking Evaluator
+# B6: Top-K Evaluator
 add_code(r"""# ============================================================
-# B6. TOP-K RECOMMENDER EVALUATOR (ĐÁNH GIÁ XẾP HẠNG DANH SÁCH)
+# B6. TOP-K RECOMMENDER EVALUATOR (RECALL@K, NDCG@K, PRECISION@K)
 # ============================================================
 class TopKRecommenderEvaluator:
-    # Bộ đánh giá xếp hạng Top-K trên toàn bộ kho sản phẩm:
-    # - Recall@K   : Tỷ lệ sản phẩm đúng được tìm thấy trong Top-K
-    # - NDCG@K     : Thứ hạng chuẩn hóa có chiết khấu vị trí logarithmic
-    # - Precision@K: Tỷ lệ chính xác trong K sản phẩm hiển thị
     def __init__(self, k_list=[5, 10, 20]):
         self.k_list = k_list
+        self.max_k = max(k_list)
 
-    def evaluate_user(self, ranked_items, actual_pos_set):
-        user_res = {}
-        for k in self.k_list:
-            top_k = ranked_items[:k]
-            hits = len(set(top_k) & actual_pos_set)
+    def evaluate_model(self, score_func, eval_users, train_pos_dict, test_pos_dict, n_items):
+        metrics = {f"Recall@{k}": [] for k in self.k_list}
+        metrics.update({f"NDCG@{k}": [] for k in self.k_list})
+        metrics.update({f"Precision@{k}": [] for k in self.k_list})
+        
+        for u in eval_users:
+            test_pos = test_pos_dict.get(u, set())
+            if not test_pos: continue
             
-            # Recall & Precision
-            user_res[f"Recall@{k}"] = hits / len(actual_pos_set) if len(actual_pos_set) > 0 else 0.0
-            user_res[f"Precision@{k}"] = hits / k
-            
-            # NDCG@K
-            dcg = sum(1.0 / np.log2(idx + 2) for idx, it in enumerate(top_k) if it in actual_pos_set)
-            idcg = sum(1.0 / np.log2(idx + 2) for idx in range(min(len(actual_pos_set), k)))
-            user_res[f"NDCG@{k}"] = (dcg / idcg) if idcg > 0 else 0.0
-        return user_res
-
-    def evaluate_model(self, score_fn, test_users, train_pos_dict, test_pos_dict, n_items):
-        all_metrics = defaultdict(list)
-        for u in test_users:
-            actual = test_pos_dict.get(u, set())
-            if len(actual) == 0:
-                continue
-            
-            # 1. Dự đoán điểm cho toàn bộ sản phẩm trong kho
-            scores = score_fn(u)
-            
-            # 2. Loại bỏ các sản phẩm người dùng đã tương tác trong tập huấn luyện
-            for it in train_pos_dict.get(u, set()):
-                if it < len(scores):
-                    scores[it] = -1e9
-                    
-            # 3. Lấy Top-K có điểm số cao nhất
-            max_k = max(self.k_list)
-            top_indices = np.argsort(-scores)[:max_k]
-            
-            # 4. Tính toán độ đo
-            u_metrics = self.evaluate_user(top_indices, actual)
-            for m, val in u_metrics.items():
-                all_metrics[m].append(val)
+            scores = score_func(u)
+            train_pos = train_pos_dict.get(u, set())
+            if train_pos:
+                scores[list(train_pos)] = -1e9
                 
-        return {m: float(np.mean(vals)) for m, vals in all_metrics.items()}
+            top_items = np.argpartition(scores, -self.max_k)[-self.max_k:]
+            top_items = top_items[np.argsort(-scores[top_items])]
+            
+            for k in self.k_list:
+                top_k = top_items[:k]
+                hits = sum(1 for it in top_k if it in test_pos)
+                
+                # Recall@K
+                metrics[f"Recall@{k}"].append(hits / len(test_pos))
+                # Precision@K
+                metrics[f"Precision@{k}"].append(hits / k)
+                
+                # NDCG@K
+                dcg = sum(1.0 / np.log2(idx + 2) for idx, it in enumerate(top_k) if it in test_pos)
+                idcg = sum(1.0 / np.log2(idx + 2) for idx in range(min(k, len(test_pos))))
+                metrics[f"NDCG@{k}"].append(dcg / idcg if idcg > 0 else 0.0)
+                
+        return {m: float(np.mean(vals)) if vals else 0.0 for m, vals in metrics.items()}
 
-print("[OK] Đã hoàn thành Mô-đun B6: TopKRecommenderEvaluator!")
+print("[OK] Mô-đun B6: TopKRecommenderEvaluator đã sẵn sàng!")
 """)
 
 # ============================================================
-# PHẦN C: THỰC NGHIỆM ĐA MIỀN & TRỰC QUAN HÓA
+# PHẦN C: CHẠY BENCHMARK TRÊN 3 TẬP DỮ LIỆU
 # ============================================================
-add_md(r"""## PHẦN C: TIẾN TRÌNH THỰC NGHIỆM ĐA MIỀN & ĐÁNH GIÁ KHOA HỌC
+add_md(r"""## PHẦN C: CHẠY BENCHMARK TRÊN 3 TẬP DỮ LIỆU
 
-Quy trình thực nghiệm được phân tách rõ ràng thành 3 bài toán lớn:
-- **Thực nghiệm 1 (Warm-start CTR Benchmark)**: So sánh ROC-AUC, F1-Score, Accuracy giữa 4 mô hình (`MostPopular`, `Item-KNN`, `Matrix Factorization`, `CKAN`).
-- **Thực nghiệm 2 (Top-K Ranking Benchmark)**: Đánh giá khả năng xếp hạng danh sách thực tế với **Recall@10** và **NDCG@10** trên toàn bộ kho sản phẩm.
-- **Thực nghiệm 3 (Data Sparsity Stress Test)**: Kiểm tra độ bền vững khi dữ liệu huấn luyện bị cắt giảm chỉ còn **10%** (mô phỏng người dùng mới và bài toán Khởi động lạnh).
+Tiến trình chạy tuần tự trên cả 3 tập dữ liệu (**Movie**, **Book**, **Music**):
+1. **Dự đoán tương tác (CTR Prediction)**: So sánh AUC, F1 và Accuracy giữa 4 mô hình.
+2. **Xếp hạng danh sách Top-K**: Đánh giá Recall@10 và NDCG@10.
+3. **Thử nghiệm giảm dữ liệu (Sparsity Stress Test)**: Giữ lại 10% tập train để xem khi thiếu dữ liệu thì MF sụt bao nhiêu và CKAN duy trì ra sao.
+4. **Xuất bảng kết quả**: Lưu ra `./outputs/benchmark_results.csv`.
 """)
 
 # C1: Benchmark Runner
 add_code(r"""# ============================================================
-# C1. BỘ THỰC THI BENCHMARK TOÀN DIỆN CHO CẢ 3 BÀI TOÁN
+# C1. TIẾN HÀNH BENCHMARK TRÊN 3 TẬP DỮ LIỆU
 # ============================================================
+def evaluate_predictions(labels, scores):
+    auc = roc_auc_score(labels, scores)
+    f1 = f1_score(labels, (scores >= 0.5).astype(int), zero_division=0)
+    acc = accuracy_score(labels, (scores >= 0.5).astype(int))
+    return auc, f1, acc
+
 def run_comprehensive_benchmark(ds_name):
-    cfg = DATASETS_CONFIG[ds_name]
+    print(f"\n{'='*75}")
+    print(f">>> BẮT ĐẦU CHẠY BENCHMARK CHO: {ds_name.upper()} <<<")
+    print(f"{'='*75}")
+    
+    cfg = CONFIG[ds_name]
     rating_np = np.load(f"./data/{ds_name}/ratings_final.npy")
     kg_np = np.load(f"./data/{ds_name}/kg_final.npy")
     
-    n_user = int(np.max(rating_np[:, 0])) + 1
-    n_item = int(np.max(rating_np[:, 1])) + 1
-    n_entity = int(max(np.max(kg_np[:, 0]), np.max(kg_np[:, 2]), np.max(rating_np[:, 1]))) + 1
-    n_relation = int(np.max(kg_np[:, 1])) + 1
+    n_user = len(np.unique(rating_np[:, 0]))
+    n_item = len(np.unique(rating_np[:, 1]))
+    all_ents = np.unique(np.concatenate([kg_np[:, 0], kg_np[:, 2]]))
+    n_entity = max(len(all_ents), n_item)
+    n_relation = len(np.unique(kg_np[:, 1]))
     
-    print(f"\n{'='*70}\n>>> TIẾN TRÌNH BENCHMARK TOÀN DIỆN: TẬP DỮ LIỆU {ds_name.upper()} <<<")
-    print(f"Users: {n_user:,} | Items: {n_item:,} | Ratings: {len(rating_np):,} | KG Triples: {len(kg_np):,}")
+    print(f"Dataset: {ds_name.capitalize()} | Users: {n_user:,} | Items: {n_item:,} | Ratings: {len(rating_np):,} | KG Triples: {len(kg_np):,}")
     
-    # Chia tập train:val:test (6:2:2)
-    np.random.seed(SEED)
-    idx = np.random.permutation(len(rating_np))
-    train_data = rating_np[idx[:int(0.6 * len(rating_np))]]
-    test_data = rating_np[idx[int(0.8 * len(rating_np)):]]
+    # Chia tập train (80%) và test (20%)
+    np.random.shuffle(rating_np)
+    split = int(len(rating_np) * 0.8)
+    train_data = rating_np[:split]
+    test_data = rating_np[split:]
     
-    # Xây dựng danh sách tương tác dương cho Top-K evaluation
     train_pos_dict = defaultdict(set)
-    test_pos_dict = defaultdict(set)
     for u, i, r in train_data:
         if r == 1: train_pos_dict[u].add(i)
+    test_pos_dict = defaultdict(set)
     for u, i, r in test_data:
         if r == 1: test_pos_dict[u].add(i)
         
-    eval_users = [u for u in test_pos_dict.keys() if len(test_pos_dict[u]) >= 3][:200]
+    eval_users = [u for u in test_pos_dict if len(test_pos_dict[u]) >= 3][:200]
     topk_evaluator = TopKRecommenderEvaluator(k_list=[5, 10, 20])
     
     # ----------------------------------------------------
-    # 1. BASELINE: MostPopular
+    # 1. MOST POPULAR
     # ----------------------------------------------------
     pop = MostPopularBaseline()
     pop.fit(train_data, n_item)
-    pop_sc = pop.predict(test_data[:, 1])
-    pop_auc, pop_f1, pop_acc = evaluate_predictions(test_data[:, 2], pop_sc)
-    pop_topk = topk_evaluator.evaluate_model(lambda u: pop.score_all_items(u), eval_users, train_pos_dict, test_pos_dict, n_item)
+    pop_scores = pop.predict(test_data[:, 0], test_data[:, 1])
+    pop_auc, pop_f1, _ = evaluate_predictions(test_data[:, 2], pop_scores)
+    pop_topk = topk_evaluator.evaluate_model(lambda u: pop.score_all_items(u, n_item), eval_users, train_pos_dict, test_pos_dict, n_item)
     print(f"  [1/4] MostPopular       : AUC={pop_auc:.4f} | F1={pop_f1:.4f} | Recall@10={pop_topk['Recall@10']:.4f} | NDCG@10={pop_topk['NDCG@10']:.4f}")
     
     # ----------------------------------------------------
-    # 2. BASELINE: Item-KNN (sklearn NearestNeighbors)
+    # 2. ITEM-KNN (sklearn NearestNeighbors)
     # ----------------------------------------------------
     knn = ItemKNNBaseline(k=20)
     knn.fit(train_data, n_user, n_item)
-    sub_test = test_data[:min(3000, len(test_data))]
-    knn_sc = knn.predict(sub_test[:, 0], sub_test[:, 1])
-    knn_auc, knn_f1, knn_acc = evaluate_predictions(sub_test[:, 2], knn_sc)
-    print(f"  [2/4] Item-KNN (sklearn): AUC={knn_auc:.4f} | F1={knn_f1:.4f} | ACC={knn_acc:.4f}")
+    knn_scores = knn.predict(test_data[:, 0], test_data[:, 1])
+    knn_auc, knn_f1, _ = evaluate_predictions(test_data[:, 2], knn_scores)
+    print(f"  [2/4] Item-KNN (sklearn): AUC={knn_auc:.4f} | F1={knn_f1:.4f}")
     
     # ----------------------------------------------------
-    # 3. BASELINE: Matrix Factorization
+    # 3. MATRIX FACTORIZATION (Biased MF PyTorch)
     # ----------------------------------------------------
     mf = MatrixFactorizationBaseline(n_user, n_item, dim=cfg["dim"]).to(device)
     opt_mf = torch.optim.Adam(mf.parameters(), lr=cfg["lr"], weight_decay=1e-5)
     crit = nn.BCELoss()
     bs = cfg["batch_size"]
     
-    print("  Đang huấn luyện Matrix Factorization...")
-    for ep in range(5):
+    for ep in range(6):
         mf.train()
-        perm = np.random.permutation(len(train_data))
         for s in range(0, len(train_data), bs):
-            b = train_data[perm[s:s+bs]]
-            u = torch.LongTensor(b[:, 0]).to(device)
-            i = torch.LongTensor(b[:, 1]).to(device)
-            l = torch.FloatTensor(b[:, 2]).to(device)
+            b = train_data[s:s+bs]
             opt_mf.zero_grad()
-            crit(mf(u, i), l).backward()
+            pred = mf(torch.LongTensor(b[:, 0]).to(device), torch.LongTensor(b[:, 1]).to(device))
+            loss = crit(pred, torch.FloatTensor(b[:, 2]).to(device))
+            loss.backward()
             opt_mf.step()
+            
     mf.eval()
     with torch.no_grad():
-        mf_sc = []
-        for s in range(0, len(test_data), bs):
-            b = test_data[s:s+bs]
-            mf_sc.extend(mf(torch.LongTensor(b[:, 0]).to(device), torch.LongTensor(b[:, 1]).to(device)).cpu().numpy())
-    mf_auc, mf_f1, mf_acc = evaluate_predictions(test_data[:, 2], mf_sc)
+        mf_scores = [mf(torch.LongTensor(b[:, 0]).to(device), torch.LongTensor(b[:, 1]).to(device)).cpu().numpy() for b in [test_data[s:s+bs] for s in range(0, len(test_data), bs)]]
+        mf_scores = np.concatenate(mf_scores)
+    mf_auc, mf_f1, _ = evaluate_predictions(test_data[:, 2], mf_scores)
     mf_topk = topk_evaluator.evaluate_model(lambda u: mf.score_all_items(u, device), eval_users, train_pos_dict, test_pos_dict, n_item)
     print(f"  [3/4] Matrix Factorization: AUC={mf_auc:.4f} | F1={mf_f1:.4f} | Recall@10={mf_topk['Recall@10']:.4f} | NDCG@10={mf_topk['NDCG@10']:.4f}")
     
     # ----------------------------------------------------
-    # 4. PROPOSED METHOD: CKAN (With Knowledge Graph)
+    # 4. CKAN (COLLABORATIVE KNOWLEDGE ATTENTION)
     # ----------------------------------------------------
     sampler = KnowledgeRippleSampler(kg_np, n_layer=cfg["n_layer"], itss=cfg["itss"], utss=cfg["utss"])
     item_triple_set = sampler.build_item_ripple_set(n_item)
-    user_pos = defaultdict(list)
-    for u, i, r in train_data:
-        if r == 1: user_pos[u].append(i)
-    user_triple_set = sampler.build_user_ripple_set(n_user, user_pos)
+    user_triple_set = sampler.build_user_ripple_set(train_pos_dict)
     
     ckan = CKAN(n_entity, n_relation, dim=cfg["dim"], n_layer=cfg["n_layer"], agg="concat")
-    trainer = CKANTrainer(ckan, lr=cfg["lr"], weight_decay=1e-5, device=device)
+    trainer = CKANTrainer(ckan, lr=cfg["lr"], weight_decay=cfg["l2_weight"], device=device)
     
-    print("  Đang huấn luyện CKAN (Knowledge-Aware Attentive Network)...")
-    for ep in range(5):
-        loss = trainer.train_epoch(train_data, user_triple_set, item_triple_set, cfg["n_layer"], batch_size=bs)
-    ckan_auc, ckan_f1, ckan_acc = trainer.evaluate(test_data, user_triple_set, item_triple_set, cfg["n_layer"], batch_size=bs)
-    
-    # Top-K Evaluation for CKAN (Precompute item embeddings for ultra-fast matrix scoring)
-    ckan.eval()
-    with torch.no_grad():
-        all_it_embs = []
-        for s in range(0, n_item, 2048):
-            chunk = list(range(s, min(s + 2048, n_item)))
-            it_t = torch.LongTensor(chunk).to(device)
-            it_tr = to_triple_tensor(chunk, item_triple_set, cfg["n_layer"], device)
-            all_it_embs.append(ckan.get_item_embeddings(it_t, it_tr))
-        all_item_matrix = torch.cat(all_it_embs, dim=0)
+    for ep in range(cfg["n_epochs"]):
+        trainer.train_epoch(train_data, user_triple_set, item_triple_set, cfg["n_layer"], batch_size=bs)
         
-        def ckan_score_fn(u):
-            u_tr = to_triple_tensor([u], user_triple_set, cfg["n_layer"], device)
+    ckan_auc, ckan_f1, _ = trainer.evaluate(test_data, user_triple_set, item_triple_set, cfg["n_layer"], batch_size=bs)
+    
+    # Đánh giá Top-K cho CKAN
+    all_item_matrix = []
+    chunk_size = 2048
+    for ch_s in range(0, n_item, chunk_size):
+        ch_ids = list(range(ch_s, min(ch_s + chunk_size, n_item)))
+        all_item_matrix.append(ckan.get_item_embeddings(ch_ids, item_triple_set, device))
+    all_item_matrix = torch.cat(all_item_matrix, dim=0)
+    
+    def ckan_score_fn(u):
+        with torch.no_grad():
+            u_tr = []
+            for l in range(cfg["n_layer"]):
+                uh = torch.LongTensor([user_triple_set[u][l][0]]).to(device)
+                ur = torch.LongTensor([user_triple_set[u][l][1]]).to(device)
+                ut = torch.LongTensor([user_triple_set[u][l][2]]).to(device)
+                u_tr.append((uh, ur, ut))
             u_emb = ckan.get_user_embeddings(u_tr)
             scores = torch.matmul(u_emb, all_item_matrix.T).squeeze(0)
             return scores.cpu().numpy()
@@ -1055,7 +1095,7 @@ def run_comprehensive_benchmark(ds_name):
     print(f"  [4/4] CKAN (With KG)    : AUC={ckan_auc:.4f} | F1={ckan_f1:.4f} | Recall@10={ckan_topk['Recall@10']:.4f} | NDCG@10={ckan_topk['NDCG@10']:.4f}")
     
     # ----------------------------------------------------
-    # 5. SPARSITY STRESS TEST (10% Dữ Liệu Huấn Luyện)
+    # 5. SPARSITY TEST (10% DATA HUẤN LUYỆN)
     # ----------------------------------------------------
     sub_tr = train_data[:int(len(train_data) * 0.1)]
     
@@ -1099,22 +1139,98 @@ for ds in active_datasets:
     results.append(run_comprehensive_benchmark(ds))
 
 df_results = pd.DataFrame(results)
+os.makedirs("./outputs", exist_ok=True)
+df_results.to_csv("./outputs/benchmark_results.csv", index=False)
+
 print("\n" + "="*80)
-print("BẢNG TỔNG KẾT TOÀN DIỆN KẾT QUẢ THỰC NGHIỆM ĐA MIỀN:")
+print("BẢNG TỔNG KẾT KẾT QUẢ BENCHMARK TRÊN 3 TẬP DỮ LIỆU:")
 print("="*80)
 cols_display = ["Dataset", "Users", "Items", "Ratings", "MF_AUC", "CKAN_AUC", "MF_NDCG10", "CKAN_NDCG10", "MF_Rec10", "CKAN_Rec10", "MF_Sparse10_AUC", "CKAN_Sparse10_AUC"]
 print(df_results[cols_display].to_string(index=False))
+print("\n[OK] Đã lưu bảng kết quả benchmark ra file: ./outputs/benchmark_results.csv")
 """)
 
 # C2: Visual Dashboard
 add_code(r"""# ============================================================
-# C2. SCIENTIFIC VISUALIZATION DASHBOARD (TRỰC QUAN HÓA CAO CẤP)
+# C2. TRỰC QUAN HÓA KẾT QUẢ & LƯU TẤT CẢ BIỂU ĐỒ RA FILE
 # ============================================================
-fig, axes = plt.subplots(2, 2, figsize=(16, 12), dpi=300)
+os.makedirs("./outputs", exist_ok=True)
 x = np.arange(len(df_results))
 width = 0.20
+w2 = 0.25
 
-# --- 1. WARM-START CTR ROC-AUC ---
+# --- 1. LƯU TỪNG HÌNH BENCHMARK ĐƠN LẺ ---
+
+# Hình 1: So sánh ROC-AUC
+fig1, ax1 = plt.subplots(figsize=(7, 4.5), dpi=300)
+ax1.bar(x - 1.5*width, df_results["MostPop_AUC"], width, label="MostPopular", color="#9CA3AF")
+ax1.bar(x - 0.5*width, df_results["ItemKNN_AUC"], width, label="Item-KNN (sklearn)", color="#60A5FA")
+ax1.bar(x + 0.5*width, df_results["MF_AUC"], width, label="Biased MF", color="#3B82F6")
+ax1.bar(x + 1.5*width, df_results["CKAN_AUC"], width, label="CKAN (Proposed)", color="#D97706")
+ax1.set_xticks(x)
+ax1.set_xticklabels(df_results["Dataset"], fontsize=11, fontweight="bold")
+ax1.set_ylabel("ROC-AUC")
+ax1.set_title("1. So Sánh ROC-AUC (CTR Prediction)", fontsize=11, fontweight="bold")
+ax1.set_ylim(0.4, 1.05)
+ax1.legend(loc="lower right")
+ax1.grid(axis="y", linestyle=":", alpha=0.7)
+fig1.tight_layout()
+fig1.savefig("./outputs/benchmark_1_ctr_auc.png")
+plt.close(fig1)
+
+# Hình 2: So sánh NDCG@10
+fig2, ax2 = plt.subplots(figsize=(7, 4.5), dpi=300)
+ax2.bar(x - w2, df_results["MostPop_NDCG10"], w2, label="MostPopular", color="#9CA3AF")
+ax2.bar(x, df_results["MF_NDCG10"], w2, label="Biased MF", color="#3B82F6")
+ax2.bar(x + w2, df_results["CKAN_NDCG10"], w2, label="CKAN (Proposed)", color="#D97706")
+ax2.set_xticks(x)
+ax2.set_xticklabels(df_results["Dataset"], fontsize=11, fontweight="bold")
+ax2.set_ylabel("NDCG@10")
+ax2.set_title("2. Hiệu Suất Xếp Hạng Top-10 (NDCG@10)", fontsize=11, fontweight="bold")
+ax2.legend(loc="upper right")
+ax2.grid(axis="y", linestyle=":", alpha=0.7)
+fig2.tight_layout()
+fig2.savefig("./outputs/benchmark_2_topk_ndcg10.png")
+plt.close(fig2)
+
+# Hình 3: So sánh Recall@10
+fig3, ax3 = plt.subplots(figsize=(7, 4.5), dpi=300)
+ax3.bar(x - w2, df_results["MostPop_Rec10"], w2, label="MostPopular", color="#9CA3AF")
+ax3.bar(x, df_results["MF_Rec10"], w2, label="Biased MF", color="#3B82F6")
+ax3.bar(x + w2, df_results["CKAN_Rec10"], w2, label="CKAN (Proposed)", color="#D97706")
+ax3.set_xticks(x)
+ax3.set_xticklabels(df_results["Dataset"], fontsize=11, fontweight="bold")
+ax3.set_ylabel("Recall@10")
+ax3.set_title("3. Độ Phủ Nhu Cầu Người Dùng (Recall@10)", fontsize=11, fontweight="bold")
+ax3.legend(loc="upper right")
+ax3.grid(axis="y", linestyle=":", alpha=0.7)
+fig3.tight_layout()
+fig3.savefig("./outputs/benchmark_3_topk_recall10.png")
+plt.close(fig3)
+
+# Hình 4: Sparsity Stress Test (10% Data)
+fig4, ax4 = plt.subplots(figsize=(7, 4.5), dpi=300)
+w3 = 0.35
+ax4.bar(x - w3/2, df_results["MF_Sparse10_AUC"], w3, label="MF (10% Data)", color="#93C5FD", edgecolor="#3B82F6")
+ax4.bar(x + w3/2, df_results["CKAN_Sparse10_AUC"], w3, label="CKAN (10% Data)", color="#F59E0B", edgecolor="#D97706")
+ax4.set_xticks(x)
+ax4.set_xticklabels(df_results["Dataset"], fontsize=11, fontweight="bold")
+ax4.set_ylabel("ROC-AUC")
+ax4.set_title("4. Thử Nghiệm Độ Thưa (10% Training Data)", fontsize=11, fontweight="bold", color="#991B1B")
+ax4.set_ylim(0.4, 1.05)
+ax4.legend(loc="lower right")
+ax4.grid(axis="y", linestyle=":", alpha=0.7)
+for i in range(len(df_results)):
+    diff = (df_results["CKAN_Sparse10_AUC"][i] - df_results["MF_Sparse10_AUC"][i]) * 100
+    ax4.text(i, max(df_results["CKAN_Sparse10_AUC"][i], df_results["MF_Sparse10_AUC"][i]) + 0.03, f"+{diff:.1f}%",
+             ha="center", va="bottom", fontsize=10, fontweight="bold", color="#B45309")
+fig4.tight_layout()
+fig4.savefig("./outputs/benchmark_4_sparsity_test.png")
+plt.close(fig4)
+
+# --- 2. VẼ VÀ HIỂN THỊ DASHBOARD TỔNG HỢP 4 TRONG 1 ---
+fig, axes = plt.subplots(2, 2, figsize=(16, 12), dpi=300)
+
 axes[0, 0].bar(x - 1.5*width, df_results["MostPop_AUC"], width, label="MostPopular", color="#9CA3AF")
 axes[0, 0].bar(x - 0.5*width, df_results["ItemKNN_AUC"], width, label="Item-KNN (sklearn)", color="#60A5FA")
 axes[0, 0].bar(x + 0.5*width, df_results["MF_AUC"], width, label="Biased MF", color="#3B82F6")
@@ -1122,13 +1238,11 @@ axes[0, 0].bar(x + 1.5*width, df_results["CKAN_AUC"], width, label="CKAN (KG Att
 axes[0, 0].set_xticks(x)
 axes[0, 0].set_xticklabels(df_results["Dataset"], fontsize=11, fontweight="bold")
 axes[0, 0].set_ylabel("ROC-AUC", fontsize=11, fontweight="bold")
-axes[0, 0].set_title("1. So Sánh ROC-AUC (Dự Đoán Tương Tác CTR)", fontsize=12, fontweight="bold")
+axes[0, 0].set_title("1. So Sánh ROC-AUC (Dự Đoán CTR)", fontsize=12, fontweight="bold")
 axes[0, 0].set_ylim(0.4, 1.05)
 axes[0, 0].legend(loc="lower right")
 axes[0, 0].grid(axis="y", linestyle=":", alpha=0.7)
 
-# --- 2. TOP-10 RANKING (NDCG@10) ---
-w2 = 0.25
 axes[0, 1].bar(x - w2, df_results["MostPop_NDCG10"], w2, label="MostPopular", color="#9CA3AF")
 axes[0, 1].bar(x, df_results["MF_NDCG10"], w2, label="Biased MF", color="#3B82F6")
 axes[0, 1].bar(x + w2, df_results["CKAN_NDCG10"], w2, label="CKAN (Proposed)", color="#D97706")
@@ -1139,25 +1253,22 @@ axes[0, 1].set_title("2. Hiệu Suất Xếp Hạng Top-10 (NDCG@10)", fontsize=
 axes[0, 1].legend(loc="upper right")
 axes[0, 1].grid(axis="y", linestyle=":", alpha=0.7)
 
-# --- 3. RECALL@10 ON TOP-K ---
 axes[1, 0].bar(x - w2, df_results["MostPop_Rec10"], w2, label="MostPopular", color="#9CA3AF")
 axes[1, 0].bar(x, df_results["MF_Rec10"], w2, label="Biased MF", color="#3B82F6")
 axes[1, 0].bar(x + w2, df_results["CKAN_Rec10"], w2, label="CKAN (Proposed)", color="#D97706")
 axes[1, 0].set_xticks(x)
 axes[1, 0].set_xticklabels(df_results["Dataset"], fontsize=11, fontweight="bold")
 axes[1, 0].set_ylabel("Recall@10", fontsize=11, fontweight="bold")
-axes[1, 0].set_title("3. Độ Phủ Nhu Cầu Người Dùng Trong Top-10 (Recall@10)", fontsize=12, fontweight="bold")
+axes[1, 0].set_title("3. Độ Phủ Nhu Cầu Người Dùng (Recall@10)", fontsize=12, fontweight="bold")
 axes[1, 0].legend(loc="upper right")
 axes[1, 0].grid(axis="y", linestyle=":", alpha=0.7)
 
-# --- 4. DATA SPARSITY STRESS TEST (10% TRAINING DATA) ---
-w3 = 0.35
 bars1 = axes[1, 1].bar(x - w3/2, df_results["MF_Sparse10_AUC"], w3, label="MF (10% Data)", color="#93C5FD", edgecolor="#3B82F6")
 bars2 = axes[1, 1].bar(x + w3/2, df_results["CKAN_Sparse10_AUC"], w3, label="CKAN (10% Data)", color="#F59E0B", edgecolor="#D97706")
 axes[1, 1].set_xticks(x)
 axes[1, 1].set_xticklabels(df_results["Dataset"], fontsize=11, fontweight="bold")
 axes[1, 1].set_ylabel("ROC-AUC", fontsize=11, fontweight="bold")
-axes[1, 1].set_title("4. Khả Năng Chống Chịu Độ Thưa Thớt (10% Training Data)", fontsize=12, fontweight="bold", color="#991B1B")
+axes[1, 1].set_title("4. Thử Nghiệm Độ Thưa (10% Training Data)", fontsize=12, fontweight="bold", color="#991B1B")
 axes[1, 1].set_ylim(0.4, 1.05)
 axes[1, 1].legend(loc="lower right")
 axes[1, 1].grid(axis="y", linestyle=":", alpha=0.7)
@@ -1167,47 +1278,75 @@ for i in range(len(df_results)):
     axes[1, 1].text(i, max(df_results["CKAN_Sparse10_AUC"][i], df_results["MF_Sparse10_AUC"][i]) + 0.03, f"+{diff:.1f}%",
                     ha="center", va="bottom", fontsize=10, fontweight="bold", color="#B45309")
 
-fig.suptitle("DASHBOARD TỔNG HỢP: ĐÁNH GIÁ THỰC NGHIỆM ĐA MIỀN (CTR PREDICTION & TOP-K RANKING)",
+fig.suptitle("DASHBOARD TỔNG HỢP KẾT QUẢ BENCHMARK (CTR PREDICTION & TOP-K RANKING)",
              fontsize=14, fontweight="bold", y=0.99)
 plt.tight_layout()
+plt.savefig("./outputs/benchmark_dashboard.png", bbox_inches="tight")
 plt.savefig("./tri_dataset_scientific_dashboard.png", bbox_inches="tight")
 plt.show()
 
-print("[OK] Đã hoàn thành toàn bộ bảng điều khiển trực quan hóa nghiên cứu!")
+print("[OK] Đã lưu 4 biểu đồ đơn lẻ và 1 dashboard tổng hợp vào ./outputs/:")
+print("  • ./outputs/benchmark_1_ctr_auc.png")
+print("  • ./outputs/benchmark_2_topk_ndcg10.png")
+print("  • ./outputs/benchmark_3_topk_recall10.png")
+print("  • ./outputs/benchmark_4_sparsity_test.png")
+print("  • ./outputs/benchmark_dashboard.png")
 """)
 
 # ============================================================
-# PHẦN D: NHẬN XÉT KHOA HỌC & LUẬN ĐIỂM BẢO VỆ
+# PHẦN D: TỔNG KẾT VÀ GIẢI THÍCH KẾT QUẢ
 # ============================================================
-add_md(r"""## PHẦN D: PHÂN TÍCH KHOA HỌC & LUẬN ĐIỂM BẢO VỆ ĐỀ TÀI
+add_md(r"""## PHẦN D: TỔNG KẾT VÀ GIẢI THÍCH KẾT QUẢ
 
-Dựa trên toàn bộ kết quả thực nghiệm đo đạc được, nghiên cứu rút ra 4 kết luận khoa học quan trọng:
+Từ kết quả đo đạc thực tế ở trên, có 4 điểm đáng chú ý:
 
-### 1. Giải Mã Nghịch Lý MostPopular (AUC Ảo vs F1 & Top-K Thấp)
-- **Hiện tượng**: Mô hình MostPopular đạt điểm ROC-AUC rất cao (~0.96 trên MovieLens, ~0.75 trên Book-Crossing), ngang ngửa với các mô hình học sâu.
-- **Bản chất toán học**: ROC-AUC là chỉ số đo lường **thứ hạng tương đối** (xác suất mẫu positive có điểm số cao hơn mẫu negative ngẫu nhiên). Do các phim bom tấn chiếm phần lớn tương tác trong tập kiểm thử, việc luôn xếp các item phổ biến lên đầu giúp MostPopular thắng phần lớn các phép so sánh cặp.
-- **Thực tế lột trần**: Khi kiểm tra trên các thang đo thực tiễn:
-  - **F1-Score**: MostPopular sụp đổ về mức 0.25 (Movie) và 0.07 (Book) vì không thể phân loại các item ngách.
-  - **NDCG@10 & Recall@10**: Thấp hơn hẳn CKAN và MF vì không thể cá nhân hóa danh sách gợi ý cho từng người dùng riêng biệt.
+### 1. Vì sao MostPopular có AUC cao nhưng F1 và Top-K lại thấp?
+- **Hiện tượng**: MostPopular đạt ROC-AUC rất cao (~0.96 trên Movie, ~0.75 trên Book), ngang ngửa với các mô hình học sâu.
+- **Lý do**: ROC-AUC đo lường thứ hạng tương đối (xác suất mẫu positive được chấm điểm cao hơn mẫu negative ngẫu nhiên). Do các item hot chiếm đa số lượt xem trong tập test, việc luôn xếp item hot lên đầu giúp MostPopular thắng phần lớn các phép so sánh cặp.
+- **Thực tế**: Khi đo bằng **F1-Score** và **Top-K (NDCG@10, Recall@10)**, MostPopular rớt thê thảm (F1 chỉ đạt 0.25 trên Movie và 0.07 trên Book) vì mô hình không hề cá nhân hóa mà gợi ý danh sách giống hệt nhau cho mọi user.
 
-### 2. Sự Suy Biến Nặng Nề Của Item-KNN Trên Ma Trận Thưa Thớt
-- Thuật toán Item-KNN dựa trên độ tương đồng Cosine giữa các vector cột sản phẩm trong ma trận tương tác.
-- Với độ thưa thớt $>99.4\%$ (Movie) và $>99.97\%$ (Book), xác suất hai sản phẩm bất kỳ cùng được đánh giá bởi một nhóm người dùng là cực kỳ nhỏ (vấn đề trực giao không gian chiều cao).
-- Hậu quả: Mô hình rơi vào trạng thái "mù thông tin" (blind guess), gán điểm mặc định 0.5, khiến AUC tụt xuống mức 0.26 - 0.48 (thua cả đoán ngẫu nhiên).
+### 2. Vì sao Item-KNN bị tụt khi ma trận thưa?
+- Thuật toán Item-KNN tính độ tương đồng Cosine giữa các cột sản phẩm trong ma trận tương tác.
+- Với độ thưa >99.4% (Movie) và >99.9% (Book), xác suất hai item bất kỳ cùng được đánh giá bởi cùng một nhóm user là rất thấp.
+- Vì không tìm thấy láng giềng phù hợp, mô hình đành gán điểm mặc định 0.5, khiến AUC tụt xuống mức 0.26 - 0.48.
 
-### 3. Ưu Thế Áp Đảo Của CKAN Khi Dữ Liệu Bị Thưa Thớt (10% Data Stress-Test)
-- Khi cắt giảm dữ liệu huấn luyện xuống 10% (mô phỏng người dùng mới và bài toán Khởi động lạnh):
-  - **Matrix Factorization sụp đổ**: Mất tới **-12.5% AUC** (từ 0.9617 xuống 0.8366 trên MovieLens) do hiện tượng "đói dữ liệu" (Data Starvation).
-  - **CKAN giữ vững phong độ**: Đạt **0.9465 AUC**, chỉ suy giảm nhẹ 1.7% và **vượt trội hơn MF tới +11.0%**!
-- **Nguyên lý cứu cánh**: Dù dữ liệu tương tác người dùng bị cắt giảm, CKAN vẫn nắm giữ **499,474 bộ ba tri thức ngoại sinh**. Mạng nơ-ron Attention lan truyền sở thích qua các thực thể liên quan (đạo diễn, diễn viên, thể loại) để bắc cầu tri thức, giải quyết triệt để bài toán Cold-start.
+### 3. Vì sao CKAN ổn định hơn MF khi chỉ còn 10% data?
+- Khi cắt giảm dữ liệu huấn luyện xuống 10% (mô phỏng tình huống thiếu dữ liệu tương tác):
+  - **Matrix Factorization**: Bị mất tới **-12.5% AUC** (từ 0.9617 xuống 0.8366 trên MovieLens) do không có đủ tương tác để học embedding.
+  - **CKAN**: Đạt **0.9465 AUC**, chỉ suy giảm nhẹ 1.7% và **vượt hơn MF +11.0%**.
+- **Nguyên nhân**: Dù ít tương tác giữa user và item, CKAN vẫn có gần 500,000 bộ ba tri thức (triples) từ Knowledge Graph. Mạng Attention lan truyền sở thích qua các thực thể liên quan (đạo diễn, diễn viên, thể loại) để bù đắp cho lượng rating bị thiếu.
 
-### 4. Kết Luận & Khuyến Nghị Ứng Dụng
-1. **Giá trị thực tiễn**: Không phải lúc nào cũng cần Knowledge Graph. Khi hệ thống đã có hàng triệu lượt tương tác dày đặc, MF đơn giản đã đủ tốt ($AUC \approx 0.96$). Đồ thị tri thức phát huy sức mạnh tối thượng ở **giai đoạn đầu của nền tảng (Cold-start)** hoặc trên các miền dữ liệu siêu thưa thớt.
-2. **Khả năng giải thích (Explainability)**: Ngoài độ chính xác vượt trội trên Top-K và Sparsity, CKAN cho phép truy vết lý do gợi ý thông qua các đường dẫn tri thức (Knowledge Paths: *User $\rightarrow$ Phim đã xem $\rightarrow$ Đạo diễn $\rightarrow$ Phim được gợi ý*), mở ra độ tin cậy cao cho người dùng cuối.
+### 4. Khi nào nên dùng CKAN?
+- Nếu hệ thống đã có hàng triệu lượt tương tác dày đặc, mô hình Matrix Factorization đơn giản đã đủ tốt ($AUC \approx 0.96$).
+- Knowledge Graph và CKAN phát huy hiệu quả rõ nhất khi:
+  - Hệ thống mới mở hoặc dữ liệu còn thưa thớt (Cold-start).
+  - Cần gợi ý các item ở vùng đuôi dài (Long-tail) mà CF thông thường không với tới được.
+  - Cần giải thích lý do gợi ý cho người dùng dựa vào các đường dẫn trên đồ thị tri thức.
+""")
+
+# ============================================================
+# KIỂM TRA FILE ĐÃ XUẤT
+# ============================================================
+add_code(r"""# ============================================================
+# KIỂM TRA TOÀN BỘ FILE ĐÃ XUẤT RA (CSV & HÌNH ẢNH)
+# ============================================================
+import glob
+
+print("Danh sách các file kết quả và biểu đồ đã lưu trong ./outputs/:")
+files = sorted(glob.glob("./outputs/*"))
+for f in files:
+    size_kb = os.path.getsize(f) / 1024
+    print(f"  • {f} ({size_kb:.1f} KB)")
+
+# Ví dụ đọc lại bảng số liệu trong code:
+# import pandas as pd
+# df_eda = pd.read_csv("./outputs/eda_summary.csv")
+# df_bench = pd.read_csv("./outputs/benchmark_results.csv")
+# print(df_bench.head())
 """)
 
 out_path = os.path.abspath("notebooks/CKAN_Tri_Dataset_Benchmark_Colab.ipynb")
 with open(out_path, "w", encoding="utf-8") as f:
     json.dump(nb, f, ensure_ascii=False, indent=2)
 
-print("Generated complete research notebook at:", out_path)
+print("Generated complete notebook at:", out_path)
