@@ -25,10 +25,12 @@ def add_code(text):
 add_md(r"""# Benchmark mô hình CKAN trên 3 tập dữ liệu (Movie, Book, Music)
 So sánh: MostPopular, Item-KNN, Matrix Factorization (MF), CKAN
 
+Cấu hình tham số được đối chiếu theo repo gốc của tác giả: [weberrr/CKAN](https://github.com/weberrr/CKAN) (SIGIR 2020).
+
 Notebook thực hiện:
 1. **Khám phá dữ liệu (EDA)**: Thống kê số lượng user, item, rating, độ thưa, cold-start và cấu trúc Knowledge Graph.
 2. **Baselines**: MostPopular, Item-KNN (`scikit-learn`), Matrix Factorization (`PyTorch`).
-3. **Mô hình CKAN**: Tách rõ các module (Sampler, Attention, Aggregator, Model, Trainer, Top-K Evaluator).
+3. **Mô hình CKAN**: Tách rõ các module theo đúng cấu trúc repo gốc (Sampler, Attention, Model, Trainer, Top-K Evaluator).
 4. **Đánh giá**:
    - CTR Prediction: AUC, F1, Accuracy.
    - Top-K Ranking: Recall@K, NDCG@K, Precision@K ($K \in \{5, 10, 20\}$).
@@ -96,7 +98,7 @@ Khi ma trận quá thưa hoặc gặp user/item mới (cold-start), mô hình kh
 CKAN kết hợp thêm Knowledge Graph (KG) theo hai nhánh:
 - **User Branch**: Lan truyền sở thích từ các item người dùng từng tương tác sang các entity liên quan trên KG (đạo diễn, diễn viên, thể loại...).
 - **Item Branch**: Lan truyền ngữ nghĩa từ item ứng viên sang các láng giềng trên KG.
-- **Attention Layer**: Dùng mạng nơ-ron tính attention weight giữa quan hệ và ngữ cảnh để lọc liên kết nhiễu.
+- **Attention Layer**: Mạng MLP 3 tầng + Sigmoid + Softmax tính trọng số giữa quan hệ và ngữ cảnh.
 
 ```
                     [ Lịch sử tương tác User ]                      [ Item ứng viên: v ]
@@ -111,13 +113,13 @@ CKAN kết hợp thêm Knowledge Graph (KG) theo hai nhánh:
               ┌────────────────────────────────────┐         ┌────────────────────────────────────┐
               │          ATTENTION LAYER           │         │          ATTENTION LAYER           │
               │   s = MLP([e_h ; e_r])             │         │   s = MLP([e_h ; e_r])             │
-              │   alpha = Softmax(s)               │         │   alpha = Softmax(s)               │
+              │   alpha = Softmax(Sigmoid(s))      │         │   alpha = Softmax(Sigmoid(s))      │
               │   e_u^l = sum(alpha * e_t)         │         │   e_v^l = sum(alpha * e_t)         │
               └──────────────────┬─────────────────┘         └──────────────────┬─────────────────┘
                                  │                                             │
                                  ▼                                             ▼
-                        [ Aggregator Layer ]                          [ Aggregator Layer ]
-                        Vector user: e_u                              Vector item: e_v
+                        [ Concat Aggregator ]                         [ Concat Aggregator ]
+                     e_u = [e_u^L; ...; e_u^0]                     e_v = [e_v^L; ...; e_v^0]
                                  └───────────────────────┬─────────────────────┘
                                                          │
                                                          ▼
@@ -127,38 +129,52 @@ CKAN kết hợp thêm Knowledge Graph (KG) theo hai nhánh:
 """)
 
 # ============================================================
-# 4. CẤU HÌNH THỰC NGHIỆM
+# 4. CẤU HÌNH THỰC NGHIỆM THEO REPO GỐC WEBERRR/CKAN
 # ============================================================
+add_md(r"""## 3. Cấu hình tham số (Đối chiếu repo gốc `weberrr/CKAN`)
+
+Bảng siêu tham số được căn chỉnh theo mã nguồn chính thức của tác giả:
+- `dim = 64`: Kích thước embedding vector cho entity và relation.
+- `l2_weight = 1e-5`: Hệ số chuẩn hóa L2 weight decay.
+- `agg = 'concat'`: Nối vector các tầng lan truyền lại với nhau.
+- `item_triple_set_size = 64`: Kích thước tập láng giềng lấy mẫu của Item.
+- `user_triple_set_size`: 8 hoặc 16 tùy quy mô lịch sử user.
+- `n_layer`: 1 hop cho Movie/Book để tránh nhiễu do đồ thị thưa, 2 hop cho Music để nắm bắt quan hệ track-album-artist-genre.
+""")
+
 add_code(r"""CONFIG = {
     "movie": {
         "dim": 64,
         "n_layer": 1,
-        "itss": 64,
-        "utss": 32,
-        "lr": 0.002,
-        "l2_weight": 1e-5,
-        "batch_size": 2048,
-        "n_epochs": 10
+        "itss": 64,          # item_triple_set_size = 64 (theo repo gốc)
+        "utss": 16,          # user_triple_set_size = 16 (user MovieLens có lịch sử tương tác dày)
+        "lr": 0.002,         # learning rate mặc định của repo gốc
+        "l2_weight": 1e-5,   # l2 weight decay mặc định
+        "batch_size": 2048,  # batch size theo repo gốc
+        "n_epochs": 10,
+        "agg": "concat"
     },
     "book": {
         "dim": 64,
-        "n_layer": 1,
-        "itss": 64,
-        "utss": 16,
-        "lr": 0.001,
+        "n_layer": 1,        # 1-hop cho dữ liệu siêu thưa Book-Crossing để tránh trôi ngữ nghĩa
+        "itss": 64,          # item_triple_set_size = 64
+        "utss": 8,           # user_triple_set_size = 8 (mặc định repo gốc)
+        "lr": 0.001,         # learning rate 0.001 giúp hội tụ ổn định trên ma trận siêu thưa
         "l2_weight": 1e-5,
         "batch_size": 1024,
-        "n_epochs": 8
+        "n_epochs": 8,
+        "agg": "concat"
     },
     "music": {
         "dim": 64,
-        "n_layer": 1,
-        "itss": 32,
-        "utss": 32,
+        "n_layer": 2,        # 2-hop cho Last.FM (nghệ sĩ -> album -> thể loại)
+        "itss": 64,          # item_triple_set_size = 64
+        "utss": 8,           # user_triple_set_size = 8
         "lr": 0.002,
         "l2_weight": 1e-5,
         "batch_size": 1024,
-        "n_epochs": 10
+        "n_epochs": 10,
+        "agg": "concat"
     }
 }
 
@@ -168,7 +184,7 @@ active_datasets = ["movie", "book", "music"]
 # ============================================================
 # 5. DATA PIPELINE TỰ ĐỘNG TẢI TỪ NGUỒN CHUẨN
 # ============================================================
-add_md(r"""## 3. Tải và chuẩn bị dữ liệu
+add_md(r"""## 4. Tải và chuẩn bị dữ liệu
 
 Dữ liệu tải trực tiếp từ benchmark của CKAN. Code tự tải zip, giải nén vào `./data/` và nạp vào bộ nhớ.
 """)
@@ -180,7 +196,7 @@ add_code(r"""DATA_SOURCES = {
             "https://github.com/weberrr/CKAN/raw/master/data/movie.zip"
         ],
         "dir": "./data/movie",
-        "rating_threshold": 4,
+        "rating_threshold": 4, # Theo preprocess.py của repo gốc: threshold Movie = 4
         "min_user_ratings": 10
     },
     "book": {
@@ -189,7 +205,7 @@ add_code(r"""DATA_SOURCES = {
             "https://github.com/weberrr/CKAN/raw/master/data/book.zip"
         ],
         "dir": "./data/book",
-        "rating_threshold": 0,
+        "rating_threshold": 0, # Theo preprocess.py của repo gốc: threshold Book = 0
         "min_user_ratings": 5
     },
     "music": {
@@ -198,7 +214,7 @@ add_code(r"""DATA_SOURCES = {
             "https://github.com/weberrr/CKAN/raw/master/data/music.zip"
         ],
         "dir": "./data/music",
-        "rating_threshold": 0,
+        "rating_threshold": 0, # Theo preprocess.py của repo gốc: threshold Music = 0
         "min_user_ratings": 5
     }
 }
@@ -307,7 +323,7 @@ for ds in active_datasets:
 # ============================================================
 # 5. KHÁM PHÁ DỮ LIỆU (EDA)
 # ============================================================
-add_md(r"""## 4. Khám phá dữ liệu (EDA)
+add_md(r"""## 5. Khám phá dữ liệu (EDA)
 
 Phân tích các đặc trưng chính của 3 tập dữ liệu:
 1. **Độ thưa (Sparsity)**: Tỉ lệ ô trống trong ma trận tương tác.
@@ -412,10 +428,10 @@ plt.tight_layout()
 plt.show()
 """)
 
-add_md(r"""### 4.3. Nhận xét từ dữ liệu EDA:
+add_md(r"""### 5.3. Nhận xét từ dữ liệu EDA:
 1. **Độ thưa rất cao (>99.4%)**: Ma trận tương tác phần lớn là ô trống. CF hay MF thuần túy sẽ gặp khó khăn khi thiếu tương tác, cần KG bổ trợ.
 2. **Hiện tượng đuôi dài (Long-tail)**: Lượng tương tác tập trung vào 20% item phổ biến nhất. KG giúp tìm kiếm và gợi ý các item ít tương tác ở vùng đuôi dựa trên quan hệ ngữ nghĩa.
-3. **Phân bố bậc của KG**: Đồ thị có một số entity trung tâm (hub) nhiều kết nối. Cần cơ chế lấy mẫu láng giềng kích thước cố định (`itss = 64`, `utss = 32`) để tránh tràn RAM/GPU.
+3. **Phân bố bậc của KG**: Đồ thị có một số entity trung tâm (hub) nhiều kết nối. Cần cơ chế lấy mẫu láng giềng kích thước cố định (`itss = 64`, `utss = 8/16`) để tránh bùng nổ tổ hợp và tràn bộ nhớ.
 """)
 
 # ============================================================
@@ -495,14 +511,14 @@ class MatrixFactorizationBaseline(nn.Module):
 """)
 
 # ============================================================
-# PHẦN B: TRIỂN KHAI CHI TIẾT MÔ HÌNH CKAN
+# PHẦN B: TRIỂN KHAI CHI TIẾT MÔ HÌNH CKAN (CHÍNH XÁC THEO WEBERRR/CKAN)
 # ============================================================
-add_md(r"""## PHẦN B: CÁC MODULE CỦA MÔ HÌNH CKAN
+add_md(r"""## PHẦN B: CÁC MODULE CỦA MÔ HÌNH CKAN (Theo cấu trúc `weberrr/CKAN`)
 """)
 
 # B1: Ripple Sampler
 add_code(r"""class KnowledgeRippleSampler:
-    def __init__(self, kg_np, n_layer=1, itss=64, utss=32):
+    def __init__(self, kg_np, n_layer=1, itss=64, utss=8):
         self.n_layer = n_layer
         self.itss = itss
         self.utss = utss
@@ -515,84 +531,97 @@ add_code(r"""class KnowledgeRippleSampler:
         item_triple_set = defaultdict(list)
         for it in range(n_items):
             for l in range(self.n_layer):
-                neighbors = self.kg_dict.get(it, [])
-                if len(neighbors) == 0:
-                    h, r, t = [it] * self.itss, [0] * self.itss, [it] * self.itss
+                h_list, r_list, t_list = [], [], []
+                if l == 0:
+                    entities = [it]
                 else:
-                    replace = len(neighbors) < self.itss
-                    choice = np.random.choice(len(neighbors), size=self.itss, replace=replace)
-                    h = [it] * self.itss
-                    r = [neighbors[c][1] for c in choice]
-                    t = [neighbors[c][0] for c in choice]
-                item_triple_set[it].append((h, r, t))
+                    entities = item_triple_set[it][-1][2]
+                
+                for entity in entities:
+                    for t, r in self.kg_dict.get(entity, []):
+                        h_list.append(entity)
+                        r_list.append(r)
+                        t_list.append(t)
+                        
+                if len(h_list) == 0:
+                    if l == 0:
+                        h = [it] * self.itss
+                        r = [0] * self.itss
+                        t = [it] * self.itss
+                        item_triple_set[it].append((h, r, t))
+                    else:
+                        item_triple_set[it].append(item_triple_set[it][-1])
+                else:
+                    replace = len(h_list) < self.itss
+                    indices = np.random.choice(len(h_list), size=self.itss, replace=replace)
+                    h = [h_list[i] for i in indices]
+                    r = [r_list[i] for i in indices]
+                    t = [t_list[i] for i in indices]
+                    item_triple_set[it].append((h, r, t))
         return item_triple_set
 
     def build_user_ripple_set(self, user_history_dict):
         user_triple_set = defaultdict(list)
         for u, history in user_history_dict.items():
-            current_heads = list(history)
             for l in range(self.n_layer):
                 h_list, r_list, t_list = [], [], []
-                for h in current_heads:
-                    for t, r in self.kg_dict.get(h, []):
-                        h_list.append(h); r_list.append(r); t_list.append(t)
+                if l == 0:
+                    entities = list(history)
+                else:
+                    entities = user_triple_set[u][-1][2]
+                    
+                for entity in entities:
+                    for t, r in self.kg_dict.get(entity, []):
+                        h_list.append(entity)
+                        r_list.append(r)
+                        t_list.append(t)
+                        
                 if len(h_list) == 0:
-                    fallback_h = list(history)[0] if len(history) > 0 else 0
-                    h, r, t = [fallback_h] * self.utss, [0] * self.utss, [fallback_h] * self.utss
+                    if l == 0:
+                        fallback = list(history)[0] if len(history) > 0 else 0
+                        h = [fallback] * self.utss
+                        r = [0] * self.utss
+                        t = [fallback] * self.utss
+                        user_triple_set[u].append((h, r, t))
+                    else:
+                        user_triple_set[u].append(user_triple_set[u][-1])
                 else:
                     replace = len(h_list) < self.utss
-                    choice = np.random.choice(len(h_list), size=self.utss, replace=replace)
-                    h = [h_list[c] for c in choice]
-                    r = [r_list[c] for c in choice]
-                    t = [t_list[c] for c in choice]
-                user_triple_set[u].append((h, r, t))
-                current_heads = t
+                    indices = np.random.choice(len(h_list), size=self.utss, replace=replace)
+                    h = [h_list[i] for i in indices]
+                    r = [r_list[i] for i in indices]
+                    t = [t_list[i] for i in indices]
+                    user_triple_set[u].append((h, r, t))
         return user_triple_set
 """)
 
-# B2: Attention Layer
+# B2: Attention Layer (Cấu trúc chuẩn theo src/model.py của weberrr/CKAN)
 add_code(r"""class KnowledgeAwareAttentionLayer(nn.Module):
     def __init__(self, dim):
         super().__init__()
         self.dim = dim
-        self.mlp = nn.Sequential(
-            nn.Linear(dim * 2, dim),
+        self.attention = nn.Sequential(
+            nn.Linear(dim * 2, dim, bias=False),
             nn.ReLU(),
-            nn.Linear(dim, 1)
+            nn.Linear(dim, dim, bias=False),
+            nn.ReLU(),
+            nn.Linear(dim, 1, bias=False),
+            nn.Sigmoid(),
         )
+        for layer in self.attention:
+            if isinstance(layer, nn.Linear):
+                nn.init.xavier_uniform_(layer.weight)
 
-    def forward(self, head_emb, rel_emb, tail_emb):
-        hr_concat = torch.cat([head_emb, rel_emb], dim=-1)
-        scores = self.mlp(hr_concat).squeeze(-1)
-        attn_weights = F.softmax(scores, dim=-1).unsqueeze(-1)
-        context_vec = (attn_weights * tail_emb).sum(dim=1)
-        return context_vec, attn_weights
+    def forward(self, h_emb, r_emb, t_emb):
+        # [batch_size, triple_set_size]
+        att_weights = self.attention(torch.cat((h_emb, r_emb), dim=-1)).squeeze(-1)
+        att_weights_norm = F.softmax(att_weights, dim=-1)
+        # [batch_size, triple_set_size, dim] -> [batch_size, dim]
+        emb_i = torch.mul(att_weights_norm.unsqueeze(-1), t_emb).sum(dim=1)
+        return emb_i, att_weights_norm
 """)
 
-# B3: Aggregator
-add_code(r"""class CKANAggregator(nn.Module):
-    def __init__(self, dim, agg_type="concat"):
-        super().__init__()
-        self.dim = dim
-        self.agg_type = agg_type
-        if agg_type == "concat":
-            self.linear = nn.Linear(dim * 2, dim)
-        elif agg_type == "sum":
-            self.linear = nn.Linear(dim, dim)
-        elif agg_type == "neighbor":
-            self.linear = nn.Linear(dim, dim)
-
-    def forward(self, self_vec, neighbor_vec):
-        if self.agg_type == "concat":
-            combined = torch.cat([self_vec, neighbor_vec], dim=-1)
-            return F.relu(self.linear(combined))
-        elif self.agg_type == "sum":
-            return F.relu(self.linear(self_vec + neighbor_vec))
-        elif self.agg_type == "neighbor":
-            return F.relu(self.linear(neighbor_vec))
-""")
-
-# B4: Model
+# B3: CKAN Model (Chuẩn theo src/model.py của weberrr/CKAN)
 add_code(r"""class CKAN(nn.Module):
     def __init__(self, n_entity, n_relation, dim=64, n_layer=1, agg="concat"):
         super().__init__()
@@ -600,62 +629,125 @@ add_code(r"""class CKAN(nn.Module):
         self.n_relation = n_relation
         self.dim = dim
         self.n_layer = n_layer
+        self.agg = agg
         
         self.entity_emb = nn.Embedding(n_entity, dim)
         self.relation_emb = nn.Embedding(n_relation, dim)
         nn.init.xavier_uniform_(self.entity_emb.weight)
         nn.init.xavier_uniform_(self.relation_emb.weight)
         
-        self.attn_layers = nn.ModuleList([KnowledgeAwareAttentionLayer(dim) for _ in range(n_layer)])
-        self.user_aggs = nn.ModuleList([CKANAggregator(dim, agg) for _ in range(n_layer)])
-        self.item_aggs = nn.ModuleList([CKANAggregator(dim, agg) for _ in range(n_layer)])
+        self.attention_layer = KnowledgeAwareAttentionLayer(dim)
 
-    def _propagate_knowledge(self, root_emb, triple_set, is_user=True):
-        current_rep = root_emb
-        for l in range(self.n_layer):
-            h, r, t = triple_set[l]
-            h_e = self.entity_emb(h)
-            r_e = self.relation_emb(r)
-            t_e = self.entity_emb(t)
-            context, _ = self.attn_layers[l](h_e, r_e, t_e)
-            agg = self.user_aggs[l] if is_user else self.item_aggs[l]
-            current_rep = agg(current_rep, context)
-        return current_rep
+    def _knowledge_attention(self, h_emb, r_emb, t_emb):
+        emb_i, _ = self.attention_layer(h_emb, r_emb, t_emb)
+        return emb_i
 
     def forward(self, items, user_triples, item_triples):
-        it_e = self.entity_emb(items)
-        it_rep = self._propagate_knowledge(it_e, item_triples, is_user=False)
-        u_init = self.entity_emb(user_triples[0][0]).mean(dim=1)
-        u_rep = self._propagate_knowledge(u_init, user_triples, is_user=True)
-        scores = (u_rep * it_rep).sum(dim=-1)
+        user_embeddings = []
+        user_emb_0 = self.entity_emb(user_triples[0][0]).mean(dim=1)
+        user_embeddings.append(user_emb_0)
+        
+        for i in range(self.n_layer):
+            h_emb = self.entity_emb(user_triples[i][0])
+            r_emb = self.relation_emb(user_triples[i][1])
+            t_emb = self.entity_emb(user_triples[i][2])
+            user_embeddings.append(self._knowledge_attention(h_emb, r_emb, t_emb))
+            
+        item_embeddings = []
+        item_emb_origin = self.entity_emb(items)
+        item_embeddings.append(item_emb_origin)
+        
+        for i in range(self.n_layer):
+            h_emb = self.entity_emb(item_triples[i][0])
+            r_emb = self.relation_emb(item_triples[i][1])
+            t_emb = self.entity_emb(item_triples[i][2])
+            item_embeddings.append(self._knowledge_attention(h_emb, r_emb, t_emb))
+            
+        return self.predict(user_embeddings, item_embeddings)
+
+    def predict(self, user_embeddings, item_embeddings):
+        e_u = user_embeddings[0]
+        e_v = item_embeddings[0]
+        
+        if self.agg == "concat":
+            for i in range(1, len(user_embeddings)):
+                e_u = torch.cat((user_embeddings[i], e_u), dim=-1)
+            for i in range(1, len(item_embeddings)):
+                e_v = torch.cat((item_embeddings[i], e_v), dim=-1)
+        elif self.agg == "sum":
+            for i in range(1, len(user_embeddings)):
+                e_u = e_u + user_embeddings[i]
+            for i in range(1, len(item_embeddings)):
+                e_v = e_v + item_embeddings[i]
+        elif self.agg == "pool":
+            for i in range(1, len(user_embeddings)):
+                e_u = torch.max(e_u, user_embeddings[i])
+            for i in range(1, len(item_embeddings)):
+                e_v = torch.max(e_v, item_embeddings[i])
+                
+        scores = (e_v * e_u).sum(dim=1)
         return torch.sigmoid(scores)
 
     def get_item_embeddings(self, item_ids, item_triple_set, device):
         self.eval()
         with torch.no_grad():
-            it_tensor = torch.LongTensor(item_ids).to(device)
-            it_e = self.entity_emb(it_tensor)
-            triples = []
-            for l in range(self.n_layer):
-                h = torch.LongTensor([item_triple_set[i][l][0] for i in item_ids]).to(device)
-                r = torch.LongTensor([item_triple_set[i][l][1] for i in item_ids]).to(device)
-                t = torch.LongTensor([item_triple_set[i][l][2] for i in item_ids]).to(device)
-                triples.append((h, r, t))
-            return self._propagate_knowledge(it_e, triples, is_user=False)
+            items_tensor = torch.LongTensor(item_ids).to(device)
+            item_embeddings = [self.entity_emb(items_tensor)]
+            for i in range(self.n_layer):
+                h = torch.LongTensor([item_triple_set[it][i][0] for it in item_ids]).to(device)
+                r = torch.LongTensor([item_triple_set[it][i][1] for it in item_ids]).to(device)
+                t = torch.LongTensor([item_triple_set[it][i][2] for it in item_ids]).to(device)
+                h_emb = self.entity_emb(h)
+                r_emb = self.relation_emb(r)
+                t_emb = self.entity_emb(t)
+                item_embeddings.append(self._knowledge_attention(h_emb, r_emb, t_emb))
+                
+            e_v = item_embeddings[0]
+            if self.agg == "concat":
+                for i in range(1, len(item_embeddings)):
+                    e_v = torch.cat((item_embeddings[i], e_v), dim=-1)
+            elif self.agg == "sum":
+                for i in range(1, len(item_embeddings)):
+                    e_v = e_v + item_embeddings[i]
+            elif self.agg == "pool":
+                for i in range(1, len(item_embeddings)):
+                    e_v = torch.max(e_v, item_embeddings[i])
+            return e_v
 
     def get_user_embeddings(self, user_triple_tuples):
         self.eval()
         with torch.no_grad():
-            u_init = self.entity_emb(user_triple_tuples[0][0]).mean(dim=1)
-            return self._propagate_knowledge(u_init, user_triple_tuples, is_user=True)
+            user_embeddings = [self.entity_emb(user_triple_tuples[0][0]).mean(dim=1)]
+            for i in range(self.n_layer):
+                h, r, t = user_triple_tuples[i]
+                h_emb = self.entity_emb(h)
+                r_emb = self.relation_emb(r)
+                t_emb = self.entity_emb(t)
+                user_embeddings.append(self._knowledge_attention(h_emb, r_emb, t_emb))
+                
+            e_u = user_embeddings[0]
+            if self.agg == "concat":
+                for i in range(1, len(user_embeddings)):
+                    e_u = torch.cat((user_embeddings[i], e_u), dim=-1)
+            elif self.agg == "sum":
+                for i in range(1, len(user_embeddings)):
+                    e_u = e_u + user_embeddings[i]
+            elif self.agg == "pool":
+                for i in range(1, len(user_embeddings)):
+                    e_u = torch.max(e_u, user_embeddings[i])
+            return e_u
 """)
 
-# B5: Trainer
+# B4: Trainer
 add_code(r"""class CKANTrainer:
     def __init__(self, model, lr=0.002, weight_decay=1e-5, device="cuda"):
         self.model = model.to(device)
         self.device = device
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr, weight_decay=weight_decay)
+        self.optimizer = torch.optim.Adam(
+            filter(lambda p: p.requires_grad, self.model.parameters()),
+            lr=lr,
+            weight_decay=weight_decay
+        )
         self.criterion = nn.BCELoss()
 
     def train_epoch(self, train_data, user_triples_dict, item_triples_dict, n_layer, batch_size=2048):
@@ -727,7 +819,7 @@ add_code(r"""class CKANTrainer:
         return auc, f1, acc
 """)
 
-# B6: Top-K Evaluator
+# B5: Top-K Evaluator
 add_code(r"""class TopKRecommenderEvaluator:
     def __init__(self, k_list=[5, 10, 20]):
         self.k_list = k_list
@@ -782,7 +874,6 @@ def run_comprehensive_benchmark(ds_name):
     rating_np = np.load(f"./data/{ds_name}/ratings_final.npy")
     kg_np = np.load(f"./data/{ds_name}/kg_final.npy")
     
-    # Sửa index bounds để tránh lỗi out of range trong nn.Embedding
     n_user = int(rating_np[:, 0].max()) + 1
     n_item = max(int(rating_np[:, 1].max()), int(kg_np[:, 0].max())) + 1
     n_entity = max(int(rating_np[:, 1].max()), int(kg_np[:, 0].max()), int(kg_np[:, 2].max())) + 1
@@ -849,7 +940,7 @@ def run_comprehensive_benchmark(ds_name):
     item_triple_set = sampler.build_item_ripple_set(n_item)
     user_triple_set = sampler.build_user_ripple_set(train_pos_dict)
     
-    ckan = CKAN(n_entity, n_relation, dim=cfg["dim"], n_layer=cfg["n_layer"], agg="concat")
+    ckan = CKAN(n_entity, n_relation, dim=cfg["dim"], n_layer=cfg["n_layer"], agg=cfg["agg"])
     trainer = CKANTrainer(ckan, lr=cfg["lr"], weight_decay=cfg["l2_weight"], device=device)
     
     for ep in range(cfg["n_epochs"]):
@@ -896,7 +987,7 @@ def run_comprehensive_benchmark(ds_name):
         mf_sp_sc = np.concatenate(mf_sp_sc)
     mf_sp_auc, _, _ = evaluate_predictions(test_data[:, 2], mf_sp_sc)
     
-    ck_sp = CKAN(n_entity, n_relation, dim=cfg["dim"], n_layer=cfg["n_layer"], agg="concat")
+    ck_sp = CKAN(n_entity, n_relation, dim=cfg["dim"], n_layer=cfg["n_layer"], agg=cfg["agg"])
     trainer_sp = CKANTrainer(ck_sp, lr=cfg["lr"], weight_decay=1e-5, device=device)
     for _ in range(4):
         trainer_sp.train_epoch(sub_tr, user_triple_set, item_triple_set, cfg["n_layer"], batch_size=bs)
