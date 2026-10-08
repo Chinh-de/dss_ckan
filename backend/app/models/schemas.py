@@ -1,5 +1,8 @@
-from typing import List, Optional, Dict, Any
+from typing import List, Literal, Optional, Dict, Any
 from pydantic import BaseModel, EmailStr, Field
+
+# Unknown domains are rejected with 422 instead of silently falling back to movies.
+DomainName = Literal["movie", "book", "music"]
 
 # Auth schemas
 class UserCreate(BaseModel):
@@ -54,20 +57,96 @@ class RatingResponseDto(BaseModel):
 
 # Recommendation schemas
 class RecommendationItemDto(BaseModel):
-    movieId: int
+    id: int
+    movieId: Optional[int] = None
     movieLensId: Optional[int] = None
+    domain: str = "movie"
     title: str
+    subtitle: Optional[str] = None
+    secondaryInfo: Optional[str] = None
     releaseYear: Optional[int] = None
     genres: List[str] = Field(default_factory=list)
     posterUrl: Optional[str] = None
     score: float
     totalRatings: Optional[int] = 0
     reasons: List[str] = Field(default_factory=list)
+    metadata: Optional[Dict[str, Any]] = None
 
 class RecommendationResponseDto(BaseModel):
     userId: int
+    domain: str = "movie"
     total: int
     recommendations: List[RecommendationItemDto]
+
+class RecommendationFeedbackDto(BaseModel):
+    domain: DomainName = "movie"
+    userId: int
+    itemId: int
+    action: str = Field(..., pattern="^(LIKE|DISLIKE)$")
+
+# Domain schemas
+class DomainInfoDto(BaseModel):
+    id: str
+    name: str
+    vietnameseName: str
+    itemTerm: str
+    description: str
+    itemsCount: int
+    usersCount: int
+    triplesCount: int
+    relationsCount: int
+    sampleUsers: List[int]
+    accentColor: str
+
+class DomainListResponseDto(BaseModel):
+    domains: List[DomainInfoDto]
+
+# Benchmark & Cold-Start schemas
+class SparsityPointDto(BaseModel):
+    """Test ROC-AUC when only `ratio` of the training interactions is kept."""
+    ratio: float
+    mf_auc: float
+    ripplenet_auc: float
+    ckan_auc: float
+
+class ModelResultDto(BaseModel):
+    """Full-data test metrics of one model, as measured in the benchmark notebook."""
+    model: str
+    auc: float
+    f1: float
+    acc: float
+    recall: Dict[str, float]
+
+class ColdStartSimulationResponseDto(BaseModel):
+    domain: str
+    interactions: int
+    source: str
+    sparsity: List[SparsityPointDto]
+    # The sparsity AUCs are measured on the users who already have a positive at the lowest ratio.
+    sparsityEvalUsers: Optional[int] = None
+    sparsityEvalRows: Optional[int] = None
+    models: List[ModelResultDto]
+    seedItems: List[str]
+    popularRecommendations: List[RecommendationItemDto]
+    ckanRecommendations: List[RecommendationItemDto]
+
+# Item Explore schemas
+class ItemDto(BaseModel):
+    id: int
+    domain: str
+    title: str
+    subtitle: Optional[str] = None
+    category: Optional[str] = None
+    posterUrl: Optional[str] = None
+    releaseYear: Optional[int] = None
+    details: Optional[Dict[str, Any]] = None
+
+class ItemListResponseDto(BaseModel):
+    domain: str
+    total: int
+    page: int
+    limit: int
+    data: List[ItemDto]
 
 # Graph schemas
 class GraphNodeDto(BaseModel):
@@ -92,6 +171,7 @@ class ExplanationPathDto(BaseModel):
     id: str
     sourceMovieTitle: str
     relation: str
+    relationLabel: Optional[str] = None
     entityName: str
     targetMovieTitle: str
     naturalLanguage: str
@@ -99,6 +179,7 @@ class ExplanationPathDto(BaseModel):
 class ExplanationResponseDto(BaseModel):
     userId: int
     movieId: int
+    domain: str = "movie"
     score: float
     confidence: str
     executiveSummary: str
@@ -116,6 +197,7 @@ class UserProfileDto(BaseModel):
     totalLikes: int = 0
     totalDislikes: int = 0
     topGenres: List[str] = Field(default_factory=list)
+    sampleLikes: List[str] = Field(default_factory=list)
 
 class UserListResponse(BaseModel):
     total: int
@@ -142,4 +224,5 @@ class UserHistoryResponse(BaseModel):
     page: int
     limit: int
     items: List[UserHistoryItemDto]
+
 

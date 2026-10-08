@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.core.config import settings
+from app.core.config import settings, DEFAULT_JWT_SECRET
 from app.core.neo4j_client import neo4j_client
 from app.recommendation.engine import recommendation_engine
 from app.api.v1.auth import router as auth_router
@@ -13,6 +13,9 @@ from app.api.v1.recommendations import router as recs_router
 from app.api.v1.explainability import router as explain_router
 from app.api.v1.graph import router as graph_router
 from app.api.v1.users import router as users_router
+from app.api.v1.domains import router as domains_router
+from app.api.v1.benchmark import router as benchmark_router
+from app.api.v1.items import router as items_router
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s [%(name)s]: %(message)s")
 logger = logging.getLogger("main")
@@ -20,6 +23,8 @@ logger = logging.getLogger("main")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting up CKAN Unified FastAPI Backend...")
+    if settings.JWT_SECRET == DEFAULT_JWT_SECRET:
+        logger.warning("JWT_SECRET is the built-in default. Set JWT_SECRET in .env before deploying.")
     # Initialize SQL database schema if reachable
     try:
         from app.core.database import engine, Base
@@ -52,7 +57,7 @@ app = FastAPI(
 # Enable CORS for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -61,6 +66,9 @@ app.add_middleware(
 # Mount API v1 Routers
 api_v1_prefix = settings.API_V1_STR
 app.include_router(auth_router, prefix=api_v1_prefix)
+app.include_router(domains_router, prefix=api_v1_prefix)
+app.include_router(benchmark_router, prefix=api_v1_prefix)
+app.include_router(items_router, prefix=api_v1_prefix)
 app.include_router(movies_router, prefix=api_v1_prefix)
 app.include_router(ratings_router, prefix=api_v1_prefix)
 app.include_router(recs_router, prefix=api_v1_prefix)

@@ -1,0 +1,23 @@
+{
+  "request": "http://127.0.0.1:8000/api/v1/explainability/234?domain=movie&userId=1",
+  "paths": [
+    {
+      "id": "path-0",
+      "sourceMovieTitle": "Field of Dreams",
+      "relation": "film.film.set_designer",
+      "relationLabel": "thiết kế bối cảnh",
+      "entityName": "Nancy Haigh",
+      "targetMovieTitle": "Forrest Gump",
+      "naturalLanguage": "Người dùng đã thích \"Field of Dreams\", có chung thiết kế bối cảnh với \"Forrest Gump\"."
+    },
+    {
+      "id": "path-1",
+      "sourceMovieTitle": "Truman Show, The",
+      "relation": "film.film.set_designer",
+      "relationLabel": "thiết kế bối cảnh",
+      "entityName": "Nancy Haigh",
+      "targetMovieTitle": "Forrest Gump",
+      "naturalLanguage": "Người dùng đã thích \"Truman Show, The\", có chung thiết kế bối cảnh với \"Forrest Gump\"."
+    }
+  ]
+}

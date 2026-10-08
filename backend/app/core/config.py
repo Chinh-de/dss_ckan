@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     # JWT Security
     JWT_SECRET: str = os.getenv("JWT_SECRET", "ckan_secret_jwt_key_2026_super_secure")
     JWT_ALGORITHM: str = "HS256"
+
+    # Comma-separated browser origins allowed to call the API.
+    CORS_ORIGINS: str = os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000"
+    )
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
     
     # Data & ML Model Paths
@@ -46,4 +52,7 @@ class Settings(BaseSettings):
         extra = "ignore"
 
 settings = Settings()
+
+# Shipped fallback, only acceptable for local demos.
+DEFAULT_JWT_SECRET = "ckan_secret_jwt_key_2026_super_secure"
 

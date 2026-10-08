@@ -1,142 +1,150 @@
-import React, { useState } from "react";
-import { Navbar } from "./components/Navbar";
+import { useState, useEffect } from "react";
+import { Navbar, NavTabType } from "./components/Navbar";
 import { RecommendationsView } from "./components/RecommendationsView";
-import { MovieExploreView } from "./components/MovieExploreView";
 import { KnowledgeGraphView } from "./components/KnowledgeGraphView";
-import { UserHistoryView } from "./components/UserHistoryView";
+import { ColdStartView } from "./components/ColdStartView";
+import { CatalogExploreView } from "./components/CatalogExploreView";
 import { UserSelectModal } from "./components/UserSelectModal";
-import { OnboardingModal } from "./components/OnboardingModal";
 import { ExplainModal } from "./components/ExplainModal";
 import { api } from "./services/api";
+import { DomainType, DomainInfo } from "./types";
+import { DOMAIN_META } from "./lib/theme";
+
+const TABS: NavTabType[] = ["recommendations", "graph", "coldstart", "explore"];
+
+function readStored<T>(key: string, parse: (raw: string) => T | null, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw !== null) {
+      const parsed = parse(raw);
+      if (parsed !== null) return parsed;
+    }
+  } catch (e) {
+    console.warn(`Could not read ${key} from localStorage`, e);
+  }
+  return fallback;
+}
+
+function store(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch (e) {
+    console.warn(`Could not save ${key} to localStorage`, e);
+  }
+}
 
 export function App() {
-  const [activeTab, setActiveTab] = useState<"recommendations" | "explore" | "graph" | "history">(() => {
-    try {
-      const saved = localStorage.getItem("cinegraph_active_tab");
-      if (saved === "recommendations" || saved === "explore" || saved === "graph" || saved === "history") {
-        return saved;
-      }
-    } catch (e) {
-      console.warn("Could not read activeTab from localStorage", e);
-    }
-    return "recommendations";
-  });
+  const [selectedDomain, setSelectedDomain] = useState<DomainType>(() =>
+    readStored<DomainType>("ckan_selected_domain", (raw) => (raw in DOMAIN_META ? (raw as DomainType) : null), "movie")
+  );
 
-  const [currentUserId, setCurrentUserId] = useState<number>(() => {
-    try {
-      const saved = localStorage.getItem("cinegraph_current_user_id");
-      if (saved) {
-        const parsed = parseInt(saved, 10);
-        if (!isNaN(parsed) && parsed > 0) return parsed;
-      }
-    } catch (e) {
-      console.warn("Could not read currentUserId from localStorage", e);
-    }
-    return 1;
-  });
+  const [activeTab, setActiveTab] = useState<NavTabType>(() =>
+    readStored<NavTabType>(
+      "ckan_active_tab",
+      (raw) => (TABS.includes(raw as NavTabType) ? (raw as NavTabType) : null),
+      "recommendations"
+    )
+  );
 
-  const [isOnboardingOpen, setIsOnboardingOpen] = useState<boolean>(false);
-  const [isUserSelectOpen, setIsUserSelectOpen] = useState<boolean>(false);
-  const [explainingMovieId, setExplainingMovieId] = useState<number | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<number>(() =>
+    readStored<number>(
+      "ckan_current_user_id",
+      (raw) => {
+        const parsed = parseInt(raw, 10);
+        return !isNaN(parsed) && parsed > 0 ? parsed : null;
+      },
+      1
+    )
+  );
 
-  // Sync to localStorage
-  const handleSelectTab = (tab: "recommendations" | "explore" | "graph" | "history") => {
-    setActiveTab(tab);
-    try {
-      localStorage.setItem("cinegraph_active_tab", tab);
-    } catch (e) {
-      console.warn("Could not save activeTab to localStorage", e);
-    }
-  };
+  const [domains, setDomains] = useState<DomainInfo[]>([]);
+  const [isUserSelectOpen, setIsUserSelectOpen] = useState(false);
+  const [explainingItemId, setExplainingItemId] = useState<number | null>(null);
+
+  useEffect(() => {
+    api
+      .getDomains()
+      .then((res) => {
+        if (res && res.domains) setDomains(res.domains);
+      })
+      .catch((err) => console.error("Error fetching domains:", err));
+  }, []);
+
+  // The accent lives on <html> so portalled dialogs pick it up too.
+  useEffect(() => {
+    document.documentElement.dataset.domain = selectedDomain;
+  }, [selectedDomain]);
 
   const handleSelectUser = (userId: number) => {
     setCurrentUserId(userId);
-    try {
-      localStorage.setItem("cinegraph_current_user_id", userId.toString());
-    } catch (e) {
-      console.warn("Could not save currentUserId to localStorage", e);
-    }
+    store("ckan_current_user_id", userId.toString());
   };
 
-  const handleGlobalLike = async (movieId: number) => {
-    try {
-      await api.rateMovie(currentUserId, movieId, 5.0);
-    } catch (e) {
-      console.error(e);
-    }
+  const handleSelectDomain = (domain: DomainType) => {
+    setSelectedDomain(domain);
+    store("ckan_selected_domain", domain);
+    // User ids are per dataset, so jump to that dataset's demo user.
+    handleSelectUser(DOMAIN_META[domain].defaultUser);
   };
+
+  const handleSelectTab = (tab: NavTabType) => {
+    setActiveTab(tab);
+    store("ckan_active_tab", tab);
+  };
+
+  const currentDomainInfo = domains.find((d) => d.id === selectedDomain);
 
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col font-sans selection:bg-primary/20 selection:text-primary">
-      {/* Top Navbar */}
+    <div className="flex min-h-[100dvh] flex-col">
+      <a
+        href="#main"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-accent focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-accent-ink"
+      >
+        Bỏ qua điều hướng
+      </a>
+
       <Navbar
         activeTab={activeTab}
-        setActiveTab={handleSelectTab}
-        currentUserId={currentUserId}
-        openUserSelect={() => setIsUserSelectOpen(true)}
-        openOnboarding={() => setIsOnboardingOpen(true)}
+        onTabChange={handleSelectTab}
+        domain={selectedDomain}
+        onDomainChange={handleSelectDomain}
+        userId={currentUserId}
+        onOpenUsers={() => setIsUserSelectOpen(true)}
       />
 
-      {/* Main View Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-8">
+      <main id="main" className="mx-auto w-full max-w-[1320px] flex-1 px-4 pb-24 sm:px-6 lg:px-10">
         {activeTab === "recommendations" && (
           <RecommendationsView
+            domain={selectedDomain}
             userId={currentUserId}
-            onExplain={(id) => setExplainingMovieId(id)}
-            openOnboarding={() => setIsOnboardingOpen(true)}
+            info={currentDomainInfo}
+            onExplain={setExplainingItemId}
+            onOpenUsers={() => setIsUserSelectOpen(true)}
           />
         )}
 
-        {activeTab === "explore" && (
-          <MovieExploreView
-            userId={currentUserId}
-            onLike={handleGlobalLike}
-          />
-        )}
+        {activeTab === "graph" && <KnowledgeGraphView domain={selectedDomain} userId={currentUserId} />}
 
-        {activeTab === "graph" && (
-          <KnowledgeGraphView userId={currentUserId} />
-        )}
+        {activeTab === "coldstart" && <ColdStartView domain={selectedDomain} />}
 
-        {activeTab === "history" && (
-          <UserHistoryView
-            userId={currentUserId}
-            onExplain={(id) => setExplainingMovieId(id)}
-            onChangeUser={() => setIsUserSelectOpen(true)}
-            onOpenOnboarding={() => setIsOnboardingOpen(true)}
-          />
-        )}
+        {activeTab === "explore" && <CatalogExploreView domain={selectedDomain} userId={currentUserId} />}
       </main>
 
-      {/* User Selection Modal (All 2,501+ users) */}
       <UserSelectModal
-        isOpen={isUserSelectOpen}
+        open={isUserSelectOpen}
         onClose={() => setIsUserSelectOpen(false)}
+        domain={selectedDomain}
         currentUserId={currentUserId}
         onSelectUser={handleSelectUser}
-        onUserCreated={(newUid) => {
-          handleSelectUser(newUid);
-          setIsOnboardingOpen(true);
-        }}
       />
 
-      {/* Onboarding Taste Profile Modal */}
-      <OnboardingModal
-        isOpen={isOnboardingOpen}
-        onClose={() => setIsOnboardingOpen(false)}
-        userId={currentUserId}
-        onComplete={() => {
-          handleSelectTab("recommendations");
-        }}
-      />
-
-      {/* Multi-tier Explainability Modal */}
       <ExplainModal
-        movieId={explainingMovieId}
+        itemId={explainingItemId}
+        domain={selectedDomain}
         userId={currentUserId}
-        onClose={() => setExplainingMovieId(null)}
+        onClose={() => setExplainingItemId(null)}
         onOpenFullGraph={() => {
-          setExplainingMovieId(null);
+          setExplainingItemId(null);
           handleSelectTab("graph");
         }}
       />
@@ -145,5 +153,3 @@ export function App() {
 }
 
 export default App;
-
-

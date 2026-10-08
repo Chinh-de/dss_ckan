@@ -61,9 +61,9 @@ pnpm-debug.log*
 
 # 4. Large ML Checkpoints & Intermediate Caches
 # Keep directories tracked via .gitkeep
-backend/models/*.pt
-backend/models/*.pth
-backend/models/*.bin
+*.pt
+*.pth
+*.bin
 backend/models/cache/*.pkl
 backend/models/cache/*.npy
 !backend/models/.gitkeep
@@ -98,3 +98,10 @@ Thumbs.db
 
 .agent/
 .agents/
+
+# 7. Notebook exports and report scratch files
+saved_models/
+results.zip
+~*.tmp
+~$*
+docs/report/screens/
