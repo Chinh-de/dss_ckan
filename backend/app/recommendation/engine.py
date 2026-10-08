@@ -1,6 +1,9 @@
 import os
 import json
 import pickle
+import heapq
+import threading
+from pathlib import Path
 import logging
 from typing import List, Dict, Set, Any, Optional, Tuple
 from collections import defaultdict
@@ -20,17 +23,32 @@ from app.models.schemas import (
     GraphNodeDto,
     GraphEdgeDto,
     ColdStartSimulationResponseDto,
-    ColdStartMetricDto,
+    SparsityPointDto,
+    ModelResultDto,
     ItemDto,
     ItemListResponseDto,
+    UserProfileDto,
 )
 from app.recommendation.ckan_model import CKAN
+from app.recommendation.relation_labels import relation_role, relation_node_type
 from app.recommendation.dynamic_propagation import (
     build_kg_dict,
     generate_user_triple_set,
 )
 
 logger = logging.getLogger("recommendation_engine")
+
+VALID_DOMAINS = ("movie", "book", "music")
+# Likes and hides made in the demo UI, kept across restarts for all three domains.
+FEEDBACK_PATH = BACKEND_DIR / "data" / "session_feedback.json"
+# Measured results copied out of the executed notebook by app/scripts/extract_benchmark_results.py.
+BENCHMARK_PATH = BACKEND_DIR / "data" / "benchmark_results.json"
+# Per-dataset export written by the benchmark notebook: ckan_model.pt, config.json, item_embeddings.npy.
+SAVED_MODELS_DIR = Path(os.getenv("SAVED_MODELS_DIR", str(BACKEND_DIR.parent / "saved_models")))
+
+class ItemNotFoundError(LookupError):
+    """Raised when an item id does not exist in the requested domain."""
+
 
 class ModelArgs:
     def __init__(self, d: Dict[str, Any]):
@@ -67,6 +85,19 @@ class DomainData:
         # In-memory dynamic feedback for live session updates
         self.session_likes: Dict[int, Set[int]] = defaultdict(set)
         self.session_dislikes: Dict[int, Set[int]] = defaultdict(set)
+        # Users created from the demo UI; they start with no interactions at all.
+        self.session_users: Set[int] = set()
+        # How many users liked each item in the dataset (the MostPopular baseline).
+        self.popularity: Dict[int, int] = defaultdict(int)
+        # Triple-set sizes for the user and item sides (utss / itss in the notebook's CONFIG).
+        self.utss = 32
+        self.itss = 64
+        # User-independent item embeddings, one row per item id. Loaded from the notebook export
+        # when available, otherwise filled by RecommendationEngine._ensure_item_matrix.
+        self.item_matrix: Optional[torch.Tensor] = None
+        self.model_source = "legacy checkpoint"
+        # Real names for KG entities, keyed by entity id (see app/scripts/build_entity_names.py).
+        self.entity_names: Dict[str, str] = {}
 
     def load(self, device: torch.device):
         if self.is_loaded:
@@ -92,6 +123,7 @@ class DomainData:
             for u, i, r in self.ratings_np:
                 if r == 1:
                     self.user_history[int(u)].add(int(i))
+                    self.popularity[int(i)] += 1
             logger.info(f"[{self.name}] Ratings loaded: {len(self.ratings_np)} ratings across {len(self.user_history)} users.")
 
         # 3. Load Relations
@@ -121,23 +153,103 @@ class DomainData:
                         self.metadata = {int(k): v for k, v in meta_list.items()}
                 self.all_items = sorted(list(self.metadata.keys()))
                 logger.info(f"[{self.name}] Loaded {len(self.metadata)} metadata items.")
+
+                # Enrich movie domain with TMDB poster URLs from movies_and_posters.csv
+                if self.name == "movie":
+                    posters_csv = os.path.join(self.data_dir, "movies_and_posters.csv")
+                    if os.path.exists(posters_csv):
+                        try:
+                            import csv
+                            with open(posters_csv, "r", encoding="utf-8") as pf:
+                                rdr = csv.DictReader(pf)
+                                p_map = {}
+                                for r in rdr:
+                                    mid = r.get("movieId")
+                                    p_url = r.get("poster_url", "").strip()
+                                    if mid and p_url and p_url.startswith("http"):
+                                        p_map[int(mid)] = p_url.replace("/original/", "/w500/")
+                            # Map to items
+                            matched_posters = 0
+                            for item_obj in self.metadata.values():
+                                ml_id = item_obj.get("movie_id")
+                                if ml_id and int(ml_id) in p_map:
+                                    item_obj["posterUrl"] = p_map[int(ml_id)]
+                                    matched_posters += 1
+                            logger.info(f"[{self.name}] Enriched {matched_posters} movies with TMDB posters.")
+                        except Exception as pe:
+                            logger.warning(f"Could not load posters CSV: {pe}")
+
+                # The Last.FM picture URLs in the dataset are dead; use the Deezer ones when fetched
+                # (see app/scripts/fetch_artist_images.py), otherwise leave the item without a picture.
+                if self.name == "music":
+                    images_file = os.path.join(self.data_dir, "artist_images.json")
+                    images = {}
+                    if os.path.exists(images_file):
+                        try:
+                            with open(images_file, "r", encoding="utf-8") as imf:
+                                images = json.load(imf)
+                        except Exception as ie:
+                            logger.warning(f"Could not load artist images: {ie}")
+                    for item_id, item_obj in self.metadata.items():
+                        item_obj["posterUrl"] = images.get(str(item_id))
+                    logger.info(f"[{self.name}] {len(images)} artists have a picture.")
+
+                # Ensure secure HTTPS for all metadata poster URLs
+                for item_obj in self.metadata.values():
+                    p_url = item_obj.get("posterUrl")
+                    if p_url and isinstance(p_url, str) and p_url.startswith("http://"):
+                        item_obj["posterUrl"] = p_url.replace("http://", "https://")
+
             except Exception as e:
                 logger.warning(f"[{self.name}] Could not load metadata: {e}")
+
+        names_file = os.path.join(self.data_dir, "entity_names.json")
+        if os.path.exists(names_file):
+            try:
+                with open(names_file, "r", encoding="utf-8") as nf:
+                    self.entity_names = json.load(nf)
+                logger.info(f"[{self.name}] Loaded {len(self.entity_names)} entity names.")
+            except Exception as e:
+                logger.warning(f"[{self.name}] Could not load entity names: {e}")
 
         if not self.all_items and self.ratings_np is not None:
             self.all_items = sorted(list(np.unique(self.ratings_np[:, 1])))
 
-        # 5. Load CKAN Model Checkpoint
+        # 5. Load CKAN Model Checkpoint. The notebook export wins when present, so the demo serves
+        # the same weights, depth and triple-set sizes that produced the reported metrics.
+        notebook_dir = SAVED_MODELS_DIR / self.name
+        precomputed_items = None
+        if (notebook_dir / "config.json").exists() and (notebook_dir / "ckan_model.pt").exists():
+            with open(notebook_dir / "config.json", "r", encoding="utf-8") as cf:
+                cfg = json.load(cf)
+            self.model_args = ModelArgs({
+                "dim": cfg["dim"],
+                "n_layer": cfg["n_layer"],
+                "agg": cfg["agg"],
+                "batch_size": 256,
+                "use_cuda": False,
+            })
+            self.utss = cfg["utss"]
+            self.itss = cfg["itss"]
+            self.checkpoint_path = str(notebook_dir / "ckan_model.pt")
+            self.model_source = f"notebook export ({notebook_dir.name}: n_layer={cfg['n_layer']}, utss={self.utss})"
+            if (notebook_dir / "item_embeddings.npy").exists():
+                precomputed_items = np.load(notebook_dir / "item_embeddings.npy")
+
         if os.path.exists(self.checkpoint_path):
             logger.info(f"[{self.name}] Loading CKAN checkpoint from {self.checkpoint_path}...")
             try:
                 ckpt = torch.load(self.checkpoint_path, map_location=device)
                 state_dict = ckpt.get("model_state_dict", ckpt)
+                # The notebook wraps the attention MLP in a sub-module; the weights are the same.
+                state_dict = {k.replace("attention_layer.attention.", "attention."): v for k, v in state_dict.items()}
                 self.model = CKAN(self.model_args, self.n_entity, self.n_relation)
                 self.model.load_state_dict(state_dict)
                 self.model.to(device)
                 self.model.eval()
-                logger.info(f"[{self.name}] CKAN model loaded successfully.")
+                if precomputed_items is not None:
+                    self.item_matrix = torch.from_numpy(precomputed_items).float().to(device)
+                logger.info(f"[{self.name}] CKAN model loaded successfully from {self.model_source}.")
             except Exception as e:
                 logger.error(f"[{self.name}] Failed to load checkpoint: {e}. Initializing fresh model.")
                 self.model = CKAN(self.model_args, max(self.n_entity, 10000), max(self.n_relation, 100))
@@ -166,6 +278,8 @@ class RecommendationEngine:
         self.device = torch.device("cpu")
         self.domains: Dict[str, DomainData] = {}
         self.is_loaded = False
+        self.benchmark: Dict[str, Any] = {}
+        self._feedback_lock = threading.Lock()
         self._initialized = True
 
     def initialize(self):
@@ -218,15 +332,27 @@ class RecommendationEngine:
             except Exception as e:
                 logger.error(f"Error loading domain {dname}: {e}")
 
+        for dname, domain_obj in self.domains.items():
+            try:
+                self._ensure_item_matrix(domain_obj)
+            except Exception as e:
+                logger.error(f"Could not precompute item embeddings for {dname}: {e}")
+        self._load_feedback()
+        if BENCHMARK_PATH.exists():
+            try:
+                with open(BENCHMARK_PATH, "r", encoding="utf-8") as f:
+                    self.benchmark = json.load(f)
+            except (OSError, ValueError) as e:
+                logger.warning(f"Could not load benchmark results: {e}")
         self.is_loaded = True
         logger.info("Multi-Domain Recommendation Engine initialization complete.")
 
     def get_domain(self, domain_name: str = "movie") -> DomainData:
         if not self.is_loaded:
             self.initialize()
-        domain = self.domains.get(domain_name.lower())
+        domain = self.domains.get((domain_name or "").lower())
         if not domain:
-            domain = self.domains["movie"]
+            raise ValueError(f"Unknown domain '{domain_name}'. Expected one of {VALID_DOMAINS}.")
         if not domain.is_loaded:
             domain.load(self.device)
         return domain
@@ -318,6 +444,51 @@ class RecommendationEngine:
                 logger.debug(f"Could not fetch PG dislikes: {e}")
         return dislikes
 
+    def get_user_profile(self, domain_name: str, user_id: int) -> Optional[UserProfileDto]:
+        """Profile built from the dataset's own interactions (used for book and music)."""
+        d = self.get_domain(domain_name)
+        history = d.user_history.get(user_id)
+        session = d.session_likes.get(user_id)
+        if not history and not session and user_id not in d.session_users:
+            return None
+        likes = sorted(set(history or ()) | set(session or ()))
+        hidden = d.session_dislikes.get(user_id, set())
+        titles = [d.metadata[i]["title"] for i in likes if i in d.metadata and d.metadata[i].get("title")]
+        return UserProfileDto(
+            id=user_id,
+            name=f"Người dùng #{user_id}",
+            email="",
+            totalRatings=len(likes) + len(hidden),
+            totalLikes=len(likes),
+            # ratings_final only holds positives plus sampled negatives, so real dislikes are the hidden items.
+            totalDislikes=len(hidden),
+            topGenres=[],
+            sampleLikes=titles[:3],
+        )
+
+    def list_user_profiles(
+        self, domain_name: str, page: int = 1, limit: int = 20, search: Optional[str] = None
+    ) -> Tuple[int, List[UserProfileDto]]:
+        d = self.get_domain(domain_name)
+        ids = sorted(set(d.user_history) | {u for u, items in d.session_likes.items() if items} | d.session_users)
+        s = (search or "").strip()
+        if s:
+            ids = [u for u in ids if s in str(u)]
+            ids.sort(key=lambda u: (str(u) != s, len(str(u)), u))
+        page_ids = ids[(page - 1) * limit: page * limit]
+        profiles = [p for p in (self.get_user_profile(domain_name, u) for u in page_ids) if p]
+        return len(ids), profiles
+
+    def create_user(self, domain_name: str) -> UserProfileDto:
+        """New empty user in a book/music dataset, numbered after the last existing one."""
+        d = self.get_domain(domain_name)
+        with self._feedback_lock:
+            known = set(d.user_history) | set(d.session_likes) | d.session_users
+            new_id = (max(known) if known else 0) + 1
+            d.session_users.add(new_id)
+        self._save_feedback()
+        return self.get_user_profile(domain_name, new_id)
+
     def record_feedback(self, domain_name: str, user_id: int, item_id: int, action: str):
         d = self.get_domain(domain_name)
         if action == "LIKE":
@@ -326,6 +497,93 @@ class RecommendationEngine:
         elif action == "DISLIKE":
             d.session_dislikes[user_id].add(item_id)
             d.session_likes[user_id].discard(item_id)
+        self._save_feedback()
+
+    def _save_feedback(self):
+        payload = {
+            name: {
+                "likes": {str(u): sorted(items) for u, items in d.session_likes.items() if items},
+                "dislikes": {str(u): sorted(items) for u, items in d.session_dislikes.items() if items},
+                "users": sorted(d.session_users),
+            }
+            for name, d in self.domains.items()
+        }
+        try:
+            with self._feedback_lock:
+                tmp_path = FEEDBACK_PATH.with_suffix(".json.tmp")
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    json.dump(payload, f)
+                os.replace(tmp_path, FEEDBACK_PATH)
+        except OSError as e:
+            logger.warning(f"Could not persist feedback: {e}")
+
+    def _load_feedback(self):
+        if not FEEDBACK_PATH.exists():
+            return
+        try:
+            with open(FEEDBACK_PATH, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            for name, saved in payload.items():
+                d = self.domains.get(name)
+                if not d:
+                    continue
+                for u, items in saved.get("likes", {}).items():
+                    d.session_likes[int(u)].update(int(i) for i in items)
+                for u, items in saved.get("dislikes", {}).items():
+                    d.session_dislikes[int(u)].update(int(i) for i in items)
+                d.session_users.update(int(u) for u in saved.get("users", []))
+            logger.info(f"Restored saved feedback from {FEEDBACK_PATH.name}.")
+        except (OSError, ValueError) as e:
+            logger.warning(f"Could not restore feedback: {e}")
+
+    def _aggregate(self, domain_obj: DomainData, parts: List[torch.Tensor]) -> torch.Tensor:
+        """Combine the 0-hop and per-layer embeddings, in the same order as the notebook's CKAN."""
+        agg = domain_obj.model.agg
+        if agg == "concat":
+            return torch.cat(parts, dim=-1)
+        if agg == "sum":
+            return torch.stack(parts, dim=0).sum(dim=0)
+        return parts[-1]
+
+    def _ensure_item_matrix(self, domain_obj: DomainData):
+        """Item embeddings do not depend on the user. The notebook export ships them
+        (item_embeddings.npy); without it they are rebuilt here the way the notebook's
+        KnowledgeRippleSampler does: layer 0 from the item, deeper layers from the previous tails."""
+        if domain_obj.item_matrix is not None:
+            return
+        model = domain_obj.model
+        n_layer, size = model.n_layer, domain_obj.itss
+        items = list(domain_obj.all_items)
+        width = model.dim * (n_layer + 1) if model.agg == "concat" else model.dim
+        matrix = torch.zeros((max(items) + 1 if items else 0, width), device=self.device)
+
+        with torch.no_grad():
+            for start in range(0, len(items), 1024):
+                batch = items[start:start + 1024]
+                layers = [([], [], []) for _ in range(n_layer)]
+                for item_id in batch:
+                    rng = np.random.RandomState(item_id)
+                    entities = [item_id]
+                    for l in range(n_layer):
+                        triples = [(e, r, t) for e in entities for t, r in domain_obj.kg_dict.get(e, [])]
+                        if triples:
+                            idx = rng.choice(len(triples), size=size, replace=len(triples) < size)
+                            h, r, t = zip(*(triples[i] for i in idx))
+                        else:
+                            h = r = t = (0,) * size
+                        for column, values in zip(layers[l], (h, r, t)):
+                            column.append(values)
+                        entities = t
+
+                parts = [model.entity_emb(torch.as_tensor(batch, dtype=torch.long, device=self.device))]
+                for h, r, t in layers:
+                    as_tensor = lambda rows: torch.as_tensor(rows, dtype=torch.long, device=self.device)
+                    parts.append(model._knowledge_attention(
+                        model.entity_emb(as_tensor(h)), model.relation_emb(as_tensor(r)), model.entity_emb(as_tensor(t))
+                    ))
+                matrix[torch.as_tensor(batch, dtype=torch.long, device=self.device)] = self._aggregate(domain_obj, parts)
+
+        domain_obj.item_matrix = matrix
 
     def predict_scores(
         self,
@@ -333,58 +591,28 @@ class RecommendationEngine:
         user_triple_set: List[Any],
         candidate_items: List[int]
     ) -> np.ndarray:
+        """sigmoid(user embedding . item embedding), as in the notebook's CKAN.forward."""
         if not candidate_items:
             return np.array([])
 
-        scores = []
-        batch_size = 256
-        n_layer = domain_obj.model_args.n_layer
-        start = 0
-
-        u_h = [user_triple_set[l][0] for l in range(n_layer)]
-        u_r = [user_triple_set[l][1] for l in range(n_layer)]
-        u_t = [user_triple_set[l][2] for l in range(n_layer)]
+        self._ensure_item_matrix(domain_obj)
+        model = domain_obj.model
+        as_row = lambda values: torch.as_tensor(values, dtype=torch.long, device=self.device).unsqueeze(0)
 
         with torch.no_grad():
-            while start < len(candidate_items):
-                end = min(start + batch_size, len(candidate_items))
-                batch_items = candidate_items[start:end]
-                b_size = len(batch_items)
+            parts = [model.entity_emb(as_row(user_triple_set[0][0])).mean(dim=1)]
+            for l in range(model.n_layer):
+                parts.append(model._knowledge_attention(
+                    model.entity_emb(as_row(user_triple_set[l][0])),
+                    model.relation_emb(as_row(user_triple_set[l][1])),
+                    model.entity_emb(as_row(user_triple_set[l][2])),
+                ))
+            user_emb = self._aggregate(domain_obj, parts).squeeze(0)
 
-                # Expand user tensor for batch size
-                b_uh = [torch.LongTensor([u_h[l]] * b_size).to(self.device) for l in range(n_layer)]
-                b_ur = [torch.LongTensor([u_r[l]] * b_size).to(self.device) for l in range(n_layer)]
-                b_ut = [torch.LongTensor([u_t[l]] * b_size).to(self.device) for l in range(n_layer)]
-                batch_user_triple = [b_uh, b_ur, b_ut]
+            rows = torch.as_tensor(candidate_items, dtype=torch.long, device=self.device)
+            scores = torch.sigmoid(domain_obj.item_matrix.index_select(0, rows) @ user_emb)
 
-                items_tensor = torch.LongTensor(batch_items).to(self.device)
-
-                # Items triple set tensor from KG neighbors
-                i_h_list, i_r_list, i_t_list = [], [], []
-                for l in range(n_layer):
-                    h_l, r_l, t_l = [], [], []
-                    for item_id in batch_items:
-                        nbrs = domain_obj.kg_dict.get(item_id, [])
-                        if nbrs:
-                            idx = np.random.choice(len(nbrs), 64, replace=True)
-                            h_l.append([item_id] * 64)
-                            r_l.append([nbrs[x][1] for x in idx])
-                            t_l.append([nbrs[x][0] for x in idx])
-                        else:
-                            # Self-loop fallback
-                            h_l.append([item_id] * 64)
-                            r_l.append([0] * 64)
-                            t_l.append([item_id] * 64)
-                    i_h_list.append(torch.LongTensor(h_l).to(self.device))
-                    i_r_list.append(torch.LongTensor(r_l).to(self.device))
-                    i_t_list.append(torch.LongTensor(t_l).to(self.device))
-                batch_item_triple = [i_h_list, i_r_list, i_t_list]
-
-                batch_scores = domain_obj.model(items_tensor, batch_user_triple, batch_item_triple)
-                scores.extend(batch_scores.cpu().numpy())
-                start = end
-
-        return np.array(scores)
+        return scores.cpu().numpy()
 
     def recommend(
         self,
@@ -412,11 +640,6 @@ class RecommendationEngine:
         if not candidates:
             candidates = all_items[:100]
 
-        # Limit candidate pool for fast real-time latency (<40ms)
-        if len(candidates) > 500:
-            # Sample popular or high-connectivity candidates
-            candidates = candidates[:500]
-
         # 3. Cold start handling
         if not liked_items:
             return self._popular_fallback(domain_obj, candidates, top_k)
@@ -426,7 +649,9 @@ class RecommendationEngine:
             liked_items=liked_items,
             kg_dict=domain_obj.kg_dict,
             n_layer=domain_obj.model_args.n_layer,
-            set_size=32
+            set_size=domain_obj.utss,
+            # Same user and same likes give the same sample, so a refresh does not reshuffle the list.
+            rng=np.random.RandomState(user_id % (2 ** 32)),
         )
 
         # 5. Model scoring
@@ -488,10 +713,15 @@ class RecommendationEngine:
         return "", ""
 
     def _popular_fallback(self, domain_obj: DomainData, candidates: List[int], top_k: int) -> List[RecommendationItemDto]:
+        """MostPopular baseline: the items most users liked, the same list for everyone."""
+        popularity = domain_obj.popularity
+        n_users = max(1, len(domain_obj.user_history))
+        ranked = heapq.nlargest(top_k, candidates, key=lambda i: (popularity.get(i, 0), -i))
         results = []
-        for item_id in candidates[:top_k]:
+        for item_id in ranked:
             meta = domain_obj.metadata.get(item_id, {})
             sub, sec = self._format_item_subtitles(domain_obj.name, meta)
+            liked_by = popularity.get(item_id, 0)
             results.append(RecommendationItemDto(
                 id=item_id,
                 movieId=item_id if domain_obj.name == "movie" else None,
@@ -503,8 +733,9 @@ class RecommendationEngine:
                 releaseYear=meta.get("release_year"),
                 genres=meta.get("genres", []),
                 posterUrl=meta.get("posterUrl"),
-                score=0.85,
-                reasons=[f"Gợi ý mặc định theo độ phổ biến danh mục {domain_obj.name.capitalize()} (Cold-Start)"],
+                # Share of the dataset's users who liked the item, not a model score.
+                score=round(liked_by / n_users, 4),
+                reasons=[f"Phổ biến: {liked_by:,} người dùng trong tập dữ liệu đã thích".replace(",", ".")],
                 metadata=meta
             ))
         return results
@@ -532,24 +763,28 @@ class RecommendationEngine:
         return reasons
 
     def _humanize_relation(self, raw_rel: str) -> str:
-        raw_lower = raw_rel.lower()
-        if "director" in raw_lower:
-            return "đạo diễn"
-        elif "author" in raw_lower or "writer" in raw_lower:
-            return "tác giả / biên kịch"
-        elif "actor" in raw_lower or "star" in raw_lower:
-            return "diễn viên"
-        elif "genre" in raw_lower:
-            return "thể loại"
-        elif "origin" in raw_lower or "country" in raw_lower or "birth" in raw_lower:
-            return "xuất xứ / quốc gia"
-        elif "publisher" in raw_lower:
-            return "nhà xuất bản"
-        elif "instrument" in raw_lower:
-            return "nhạc cụ biểu diễn"
-        elif "film" in raw_lower:
-            return "tác phẩm điện ảnh"
-        return "thực thể tri thức tương đồng"
+        return relation_role(raw_rel)
+
+    def _entity_label(self, domain_obj: DomainData, entity_id: int, raw_rel: str) -> str:
+        """Curated name when one exists, otherwise the role of the entity plus its id."""
+        name = domain_obj.entity_names.get(str(entity_id))
+        if name:
+            return name
+        role = relation_role(raw_rel)
+        return f"{role[:1].upper()}{role[1:]} #{entity_id}"
+
+    def _score_item(self, domain_obj: DomainData, liked_items: List[int], item_id: int) -> float:
+        """CKAN score for one user-item pair. The triple sample is seeded so that two calls
+        (with and without a liked item) are comparable."""
+        user_ts = generate_user_triple_set(
+            liked_items=liked_items,
+            kg_dict=domain_obj.kg_dict,
+            n_layer=domain_obj.model_args.n_layer,
+            set_size=domain_obj.utss,
+            rng=np.random.RandomState(20260),
+        )
+        raw = float(self.predict_scores(domain_obj, user_ts, [item_id])[0])
+        return max(0.0, min(1.0, raw))
 
     def explain(
         self,
@@ -559,28 +794,32 @@ class RecommendationEngine:
         db: Optional[Session] = None
     ) -> ExplanationResponseDto:
         domain_obj = self.get_domain(domain_name)
+        if item_id not in domain_obj.metadata and item_id not in domain_obj.kg_dict:
+            raise ItemNotFoundError(f"Mục {item_id} không tồn tại trong tập {domain_obj.name}.")
+
         target_meta = domain_obj.metadata.get(item_id, {})
         target_title = target_meta.get("title", f"Mục #{item_id}")
-
         liked_items = self.get_user_liked_items(domain_obj, user_id, db)
-        if not liked_items:
-            # Fallback to demo items if user has no likes
-            demo_user = 1 if domain_name == "movie" else (790 if domain_name == "book" else 774)
-            liked_items = list(domain_obj.user_history.get(demo_user, set()))[:5]
 
         # Find 2-hop KG paths: Liked -> rel1 -> Entity <- rel2 <- Target
         paths: List[ExplanationPathDto] = []
         nodes: Dict[str, GraphNodeDto] = {}
         edges: List[GraphEdgeDto] = []
+        edge_ids: Set[str] = set()
         weights: Dict[str, float] = defaultdict(float)
-        primary_source = "các tác phẩm bạn yêu thích trước đây"
+        primary_source_id: Optional[int] = None
+
+        def add_edge(edge_id: str, source: str, target: str, rel_type: str, label: str):
+            if edge_id not in edge_ids:
+                edge_ids.add(edge_id)
+                edges.append(GraphEdgeDto(id=edge_id, source=source, target=target, type=rel_type, label=label))
 
         user_node_id = f"user-{user_id}"
         nodes[user_node_id] = GraphNodeDto(
             id=user_node_id,
-            label=f"User #{user_id}",
+            label=f"Người dùng #{user_id}",
             type="User",
-            data={"id": user_id, "name": f"User #{user_id}"}
+            data={"id": user_id, "name": f"Người dùng #{user_id}"}
         )
 
         target_node_id = f"{domain_obj.name}-{item_id}"
@@ -591,116 +830,128 @@ class RecommendationEngine:
             data={
                 "id": item_id,
                 "title": target_title,
+                "releaseYear": target_meta.get("release_year"),
+                "genres": target_meta.get("genres", []),
                 "posterUrl": target_meta.get("posterUrl"),
                 "domain": domain_obj.name
             }
         )
 
-        # 2-hop path search
-        target_triples = domain_obj.kg_dict.get(item_id, [])
         liked_set = set(liked_items)
         rel_map = domain_obj.relations
+        max_paths = 8
+        seen_links: Set[Tuple[int, int]] = set()
 
-        found_count = 0
-        for t, r2 in target_triples:
-            if found_count >= 8:
+        for t, r2 in domain_obj.kg_dict.get(item_id, []):
+            if len(paths) >= max_paths:
                 break
             for h1, r1 in domain_obj.tail_to_heads.get(t, []):
-                if h1 in liked_set and h1 != item_id:
-                    src_meta = domain_obj.metadata.get(h1, {})
-                    src_title = src_meta.get("title", f"Item #{h1}")
-                    if found_count == 0:
-                        primary_source = f'"{src_title}"'
+                if h1 not in liked_set or h1 == item_id or (h1, t) in seen_links:
+                    continue
+                seen_links.add((h1, t))
+                src_meta = domain_obj.metadata.get(h1, {})
+                src_title = src_meta.get("title", f"Mục #{h1}")
+                if primary_source_id is None:
+                    primary_source_id = h1
 
-                    r1_name = rel_map.get(str(r1), f"rel_{r1}")
-                    r2_name = rel_map.get(str(r2), f"rel_{r2}")
-                    human_rel = self._humanize_relation(r2_name)
-                    ent_label = f"Thực thể #{t}"
+                r1_name = rel_map.get(str(r1), f"rel_{r1}")
+                r2_name = rel_map.get(str(r2), f"rel_{r2}")
+                role = relation_role(r2_name)
+                ent_label = self._entity_label(domain_obj, t, r2_name)
 
-                    # Add nodes
-                    src_node_id = f"{domain_obj.name}-{h1}"
-                    if src_node_id not in nodes:
-                        nodes[src_node_id] = GraphNodeDto(
-                            id=src_node_id,
-                            label=src_title,
-                            type="ItemLiked",
-                            data={"id": h1, "title": src_title, "posterUrl": src_meta.get("posterUrl")}
-                        )
+                src_node_id = f"{domain_obj.name}-{h1}"
+                if src_node_id not in nodes:
+                    nodes[src_node_id] = GraphNodeDto(
+                        id=src_node_id,
+                        label=src_title,
+                        type="ItemLiked",
+                        data={
+                            "id": h1,
+                            "title": src_title,
+                            "releaseYear": src_meta.get("release_year"),
+                            "genres": src_meta.get("genres", []),
+                            "posterUrl": src_meta.get("posterUrl"),
+                        }
+                    )
+                add_edge(f"e-user-{h1}", user_node_id, src_node_id, "LIKED", "đã thích")
 
-                    # Edge: User -> Liked
-                    u_edge_id = f"e-user-{h1}"
-                    if not any(e.id == u_edge_id for e in edges):
-                        edges.append(GraphEdgeDto(id=u_edge_id, source=user_node_id, target=src_node_id, type="LIKED", label="LIKED"))
+                ent_node_id = f"entity-{t}"
+                if ent_node_id not in nodes:
+                    nodes[ent_node_id] = GraphNodeDto(
+                        id=ent_node_id,
+                        label=ent_label,
+                        type=relation_node_type(r2_name),
+                        data={"id": t, "name": ent_label, "relation": r2_name}
+                    )
+                add_edge(f"e-{src_node_id}-{ent_node_id}", src_node_id, ent_node_id, r1_name, relation_role(r1_name))
+                add_edge(f"e-{target_node_id}-{ent_node_id}", target_node_id, ent_node_id, r2_name, role)
 
-                    # Intermediate Entity Node
-                    ent_node_id = f"entity-{t}"
-                    if ent_node_id not in nodes:
-                        nodes[ent_node_id] = GraphNodeDto(
-                            id=ent_node_id,
-                            label=ent_label,
-                            type="Entity",
-                            data={"id": t, "name": ent_label}
-                        )
+                weights[f"{role[:1].upper()}{role[1:]}"] += 1.0
+                paths.append(ExplanationPathDto(
+                    id=f"path-{len(paths)}",
+                    sourceMovieTitle=src_title,
+                    relation=r1_name,
+                    relationLabel=relation_role(r1_name),
+                    entityName=ent_label,
+                    targetMovieTitle=target_title,
+                    naturalLanguage=f"Người dùng đã thích \"{src_title}\", có chung {role} với \"{target_title}\"."
+                ))
+                if len(paths) >= max_paths:
+                    break
 
-                    # Edges: Liked -> Entity and Target -> Entity
-                    m1_edge_id = f"e-{src_node_id}-{ent_node_id}"
-                    if not any(e.id == m1_edge_id for e in edges):
-                        edges.append(GraphEdgeDto(id=m1_edge_id, source=src_node_id, target=ent_node_id, type=r1_name, label=r1_name))
-
-                    m2_edge_id = f"e-{target_node_id}-{ent_node_id}"
-                    if not any(e.id == m2_edge_id for e in edges):
-                        edges.append(GraphEdgeDto(id=m2_edge_id, source=target_node_id, target=ent_node_id, type=r2_name, label=r2_name))
-
-                    # Weights
-                    cat_key = human_rel.capitalize()
-                    weights[cat_key] += 1.5
-
-                    # Natural language
-                    nl = f"Gợi ý vì bạn đã thích \"{src_title}\", có chung {human_rel} với \"{target_title}\"."
-                    paths.append(ExplanationPathDto(
-                        id=f"path-{found_count}",
-                        sourceMovieTitle=src_title,
-                        relation=r1_name,
-                        entityName=ent_label,
-                        targetMovieTitle=target_title,
-                        naturalLanguage=nl
-                    ))
-                    found_count += 1
-                    if found_count >= 8:
-                        break
-
-        # Fallback if graph is disjoint
-        if not paths and liked_items:
-            first_liked = liked_items[0]
-            src_title = domain_obj.metadata.get(first_liked, {}).get("title", f"#{first_liked}")
-            primary_source = f'"{src_title}"'
-            weights["Tương đồng ma trận tương tác"] = 60.0
-            weights["Đặc trưng tiềm ẩn đồ thị"] = 40.0
-            paths.append(ExplanationPathDto(
-                id="path-0",
-                sourceMovieTitle=src_title,
-                relation="GRAPH_ATTENTION_SIMILARITY",
-                entityName="Không gian biểu diễn CKAN",
-                targetMovieTitle=target_title,
-                naturalLanguage=f"Được mô hình CKAN kết nối dựa trên sự tương đồng vector đặc trưng với \"{src_title}\"."
-            ))
-
-        # Normalize weights
+        # Share of the found paths per relation type (a count, not a model attribution).
         total_w = sum(weights.values())
-        if total_w > 0:
-            importance = {k: round((v / total_w) * 100, 1) for k, v in weights.items()}
-        else:
-            importance = {"Tương quan tri thức": 65.0, "Cộng tác người dùng": 35.0}
+        importance = {k: round((v / total_w) * 100, 1) for k, v in weights.items()} if total_w > 0 else {}
 
-        summary = f"Được đề xuất mạnh mẽ dựa trên sự liên kết tri thức với {primary_source}."
-        counterfactual = f"Nếu bạn bỏ thích {primary_source}, điểm số ưu tiên cho \"{target_title}\" sẽ giảm xấp xỉ ~35%."
+        n_paths = len(paths)
+        counterfactual = ""
+        if not liked_items:
+            score = 0.0
+            confidence = "Không đánh giá được · người dùng chưa có lượt thích"
+            summary = (
+                f"Người dùng #{user_id} chưa có lượt thích nào trong tập {domain_obj.name}, "
+                f"nên \"{target_title}\" chỉ là gợi ý mặc định, không có đường dẫn tri thức để lý giải."
+            )
+        else:
+            score = self._score_item(domain_obj, liked_items, item_id)
+            if n_paths >= 4:
+                confidence = f"Cao · {n_paths} đường dẫn tri thức"
+            elif n_paths >= 1:
+                confidence = f"Trung bình · {n_paths} đường dẫn tri thức"
+            else:
+                confidence = "Thấp · không có đường dẫn trực tiếp"
+
+            if primary_source_id is not None:
+                src_title = domain_obj.metadata.get(primary_source_id, {}).get("title", f"Mục #{primary_source_id}")
+                summary = (
+                    f"\"{target_title}\" có {n_paths} liên kết trong đồ thị tri thức với những mục người dùng "
+                    f"đã thích, bắt đầu từ \"{src_title}\"."
+                )
+                remaining = [i for i in liked_items if i != primary_source_id]
+                if remaining:
+                    without = self._score_item(domain_obj, remaining, item_id)
+                    if abs(score - without) < 0.005:
+                        counterfactual = (
+                            f"Bỏ lượt thích \"{src_title}\" thì điểm CKAN gần như không đổi "
+                            f"({score:.3f} so với {without:.3f}): gợi ý này không phụ thuộc riêng vào một lượt thích."
+                        )
+                    else:
+                        counterfactual = (
+                            f"Bỏ lượt thích \"{src_title}\" thì điểm CKAN cho \"{target_title}\" "
+                            f"đổi từ {score:.3f} thành {without:.3f}."
+                        )
+            else:
+                summary = (
+                    f"Không tìm thấy đường dẫn hai bước nào trong đồ thị tri thức giữa \"{target_title}\" và các mục "
+                    f"người dùng đã thích. Điểm số đến từ embedding mà CKAN học được."
+                )
 
         return ExplanationResponseDto(
             userId=user_id,
             movieId=item_id,
             domain=domain_obj.name,
-            score=0.93,
-            confidence="Rất cao (Đã xác minh qua đồ thị tri thức)",
+            score=round(score, 4),
+            confidence=confidence,
             executiveSummary=summary,
             paths=paths,
             featureImportance=importance,
@@ -709,106 +960,44 @@ class RecommendationEngine:
         )
 
     def simulate_cold_start(self, domain_name: str, interactions: int = 3) -> ColdStartSimulationResponseDto:
+        """Measured sparsity results from the notebook plus a live comparison: what MostPopular
+        and CKAN recommend when only `interactions` of the demo user's likes are known."""
         domain_obj = self.get_domain(domain_name)
         n = max(1, min(20, interactions))
 
-        # Benchmark curves from experimental evaluations
-        curves = {
-            "movie": [
-                {"n": 1, "cf_auc": 0.6120, "cf_f1": 0.1820, "cf_rec": 0.0420, "cf_ndcg": 0.0810, "ck_auc": 0.8810, "ck_f1": 0.8120, "ck_rec": 0.1980, "ck_ndcg": 0.2850},
-                {"n": 2, "cf_auc": 0.6840, "cf_f1": 0.2540, "cf_rec": 0.0650, "cf_ndcg": 0.1120, "ck_auc": 0.9020, "ck_f1": 0.8350, "ck_rec": 0.2240, "ck_ndcg": 0.3180},
-                {"n": 3, "cf_auc": 0.7420, "cf_f1": 0.3210, "cf_rec": 0.0890, "cf_ndcg": 0.1450, "ck_auc": 0.9210, "ck_f1": 0.8540, "ck_rec": 0.2510, "ck_ndcg": 0.3540},
-                {"n": 5, "cf_auc": 0.8150, "cf_f1": 0.5120, "cf_rec": 0.1420, "cf_ndcg": 0.2180, "ck_auc": 0.9380, "ck_f1": 0.8710, "ck_rec": 0.2780, "ck_ndcg": 0.3890},
-                {"n": 10, "cf_auc": 0.8366, "cf_f1": 0.7410, "cf_rec": 0.1850, "cf_ndcg": 0.2740, "ck_auc": 0.9465, "ck_f1": 0.8720, "ck_rec": 0.2890, "ck_ndcg": 0.4020},
-                {"n": 20, "cf_auc": 0.9120, "cf_f1": 0.8350, "cf_rec": 0.2640, "cf_ndcg": 0.3510, "ck_auc": 0.9580, "ck_f1": 0.8920, "ck_rec": 0.3150, "ck_ndcg": 0.4180},
-            ],
-            "book": [
-                {"n": 1, "cf_auc": 0.5180, "cf_f1": 0.1120, "cf_rec": 0.0150, "cf_ndcg": 0.0320, "ck_auc": 0.6950, "ck_f1": 0.6210, "ck_rec": 0.1080, "ck_ndcg": 0.1620},
-                {"n": 2, "cf_auc": 0.5420, "cf_f1": 0.1650, "cf_rec": 0.0240, "cf_ndcg": 0.0480, "ck_auc": 0.7110, "ck_f1": 0.6420, "ck_rec": 0.1210, "ck_ndcg": 0.1790},
-                {"n": 3, "cf_auc": 0.5710, "cf_f1": 0.2140, "cf_rec": 0.0380, "cf_ndcg": 0.0690, "ck_auc": 0.7240, "ck_f1": 0.6650, "ck_rec": 0.1340, "ck_ndcg": 0.1950},
-                {"n": 5, "cf_auc": 0.6010, "cf_f1": 0.3420, "cf_rec": 0.0520, "cf_ndcg": 0.0890, "ck_auc": 0.7320, "ck_f1": 0.6780, "ck_rec": 0.1410, "ck_ndcg": 0.2080},
-                {"n": 10, "cf_auc": 0.6120, "cf_f1": 0.5400, "cf_rec": 0.0620, "cf_ndcg": 0.1120, "ck_auc": 0.7380, "ck_f1": 0.6890, "ck_rec": 0.1480, "ck_ndcg": 0.2190},
-                {"n": 20, "cf_auc": 0.6840, "cf_f1": 0.6210, "cf_rec": 0.0950, "cf_ndcg": 0.1540, "ck_auc": 0.7650, "ck_f1": 0.7150, "ck_rec": 0.1680, "ck_ndcg": 0.2450},
-            ],
-            "music": [
-                {"n": 1, "cf_auc": 0.5620, "cf_f1": 0.1450, "cf_rec": 0.0380, "cf_ndcg": 0.0650, "ck_auc": 0.7850, "ck_f1": 0.7120, "ck_rec": 0.1620, "ck_ndcg": 0.2310},
-                {"n": 2, "cf_auc": 0.6150, "cf_f1": 0.2100, "cf_rec": 0.0540, "cf_ndcg": 0.0910, "ck_auc": 0.8040, "ck_f1": 0.7380, "ck_rec": 0.1810, "ck_ndcg": 0.2540},
-                {"n": 3, "cf_auc": 0.6580, "cf_f1": 0.2890, "cf_rec": 0.0760, "cf_ndcg": 0.1250, "ck_auc": 0.8210, "ck_f1": 0.7590, "ck_rec": 0.1980, "ck_ndcg": 0.2780},
-                {"n": 5, "cf_auc": 0.6890, "cf_f1": 0.4520, "cf_rec": 0.0980, "cf_ndcg": 0.1580, "ck_auc": 0.8350, "ck_f1": 0.7780, "ck_rec": 0.2150, "ck_ndcg": 0.3010},
-                {"n": 10, "cf_auc": 0.7100, "cf_f1": 0.6400, "cf_rec": 0.1150, "cf_ndcg": 0.1840, "ck_auc": 0.8450, "ck_f1": 0.7920, "ck_rec": 0.2310, "ck_ndcg": 0.3210},
-                {"n": 20, "cf_auc": 0.7820, "cf_f1": 0.7240, "cf_rec": 0.1740, "cf_ndcg": 0.2450, "ck_auc": 0.8650, "ck_f1": 0.8120, "ck_rec": 0.2580, "ck_ndcg": 0.3540},
-            ]
-        }
+        measured = self.benchmark.get("datasets", {}).get(domain_obj.name, {})
+        sparsity_data = measured.get("sparsity", {})
+        aucs = sparsity_data.get("auc", {})
+        sparsity = [
+            SparsityPointDto(
+                ratio=ratio,
+                mf_auc=aucs["MF"][i],
+                ripplenet_auc=aucs["RippleNet"][i],
+                ckan_auc=aucs["CKAN"][i],
+            )
+            for i, ratio in enumerate(sparsity_data.get("ratios", []))
+        ]
+        models = [ModelResultDto(model=name, **values) for name, values in measured.get("models", {}).items()]
 
-        domain_curve = curves.get(domain_obj.name, curves["movie"])
-        trajectory = []
-        for p in domain_curve:
-            d_auc = round(((p["ck_auc"] - p["cf_auc"]) / p["cf_auc"]) * 100, 1)
-            d_rec = round(((p["ck_rec"] - p["cf_rec"]) / p["cf_rec"]) * 100, 1)
-            trajectory.append(ColdStartMetricDto(
-                interactions=p["n"],
-                cf_auc=p["cf_auc"],
-                cf_f1=p["cf_f1"],
-                cf_recall10=p["cf_rec"],
-                cf_ndcg10=p["cf_ndcg"],
-                ckan_auc=p["ck_auc"],
-                ckan_f1=p["ck_f1"],
-                ckan_recall10=p["ck_rec"],
-                ckan_ndcg10=p["ck_ndcg"],
-                delta_auc_pct=d_auc,
-                delta_recall_pct=d_rec
-            ))
-
-        # Find closest metric for chosen n
-        current_p = min(domain_curve, key=lambda x: abs(x["n"] - n))
-        delta_auc = round(((current_p["ck_auc"] - current_p["cf_auc"]) / current_p["cf_auc"]) * 100, 1)
-        delta_rec = round(((current_p["ck_rec"] - current_p["cf_rec"]) / current_p["cf_rec"]) * 100, 1)
-        current_metric = ColdStartMetricDto(
-            interactions=n,
-            cf_auc=current_p["cf_auc"],
-            cf_f1=current_p["cf_f1"],
-            cf_recall10=current_p["cf_rec"],
-            cf_ndcg10=current_p["cf_ndcg"],
-            ckan_auc=current_p["ck_auc"],
-            ckan_f1=current_p["ck_f1"],
-            ckan_recall10=current_p["ck_rec"],
-            ckan_ndcg10=current_p["ck_ndcg"],
-            delta_auc_pct=delta_auc,
-            delta_recall_pct=delta_rec
-        )
-
-        # Sample user with limited interactions
         demo_user = 1 if domain_obj.name == "movie" else (790 if domain_obj.name == "book" else 774)
-        user_likes = list(domain_obj.user_history.get(demo_user, set()))[:n]
-        if not user_likes:
-            user_likes = domain_obj.all_items[:n]
-
-        # 1. CKAN simulated recommendations with just these n items
-        ckan_recs = self.recommend(domain_obj.name, user_id=demo_user, top_k=5, custom_liked_items=user_likes)
-
-        # 2. CF Baseline simulated recommendations (pure popularity/fallback due to isolated row)
-        cf_recs = self._popular_fallback(domain_obj, domain_obj.all_items, top_k=5)
-        for r in cf_recs:
-            r.score = round(max(0.40, min(0.68, r.score * 0.7)), 4)
-            r.reasons = [f"Gợi ý đại trà do lịch sử {n} tương tác không đủ để tính Cosine Similarity trong ma trận CF"]
-
-        explanation = (
-            f"Khi số lượt tương tác giảm xuống mức {n}, ma trận tương tác Collaborative Filtering (CF) bị thưa nghiêm trọng "
-            f"khiến độ đo tương đồng cosine không tìm được láng giềng chung (AUC tụt còn {current_p['cf_auc']:.4f}). "
-            f"Ngược lại, mô hình CKAN liên kết {n} sản phẩm đó với mạng lưới Knowledge Graph "
-            f"(đạo diễn, tác giả, thể loại), lan truyền thông tin qua lớp Attention để duy trì AUC đạt {current_p['ck_auc']:.4f} "
-            f"(vượt trội +{delta_auc}%)."
+        seed = sorted(domain_obj.user_history.get(demo_user, set()))[:n]
+        ckan_recs = self.recommend(domain_obj.name, user_id=demo_user, top_k=5, custom_liked_items=seed) if seed else []
+        seed_set = set(seed)
+        popular = self._popular_fallback(
+            domain_obj, [i for i in domain_obj.all_items if i not in seed_set], top_k=5
         )
 
         return ColdStartSimulationResponseDto(
             domain=domain_obj.name,
             interactions=n,
-            description=f"Thử nghiệm mức độ thưa {domain_obj.name.capitalize()} với {n} tương tác lịch sử",
-            currentMetrics=current_metric,
-            trajectory=trajectory,
-            cfRecommendations=cf_recs,
+            source=self.benchmark.get("source", ""),
+            sparsity=sparsity,
+            sparsityEvalUsers=sparsity_data.get("evalUsers"),
+            sparsityEvalRows=sparsity_data.get("evalRows"),
+            models=models,
+            seedItems=[domain_obj.metadata.get(i, {}).get("title", f"Mục #{i}") for i in seed],
+            popularRecommendations=popular,
             ckanRecommendations=ckan_recs,
-            explanation=explanation
         )
 
     def get_items(

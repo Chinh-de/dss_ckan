@@ -1,5 +1,8 @@
-from typing import List, Optional, Dict, Any
+from typing import List, Literal, Optional, Dict, Any
 from pydantic import BaseModel, EmailStr, Field
+
+# Unknown domains are rejected with 422 instead of silently falling back to movies.
+DomainName = Literal["movie", "book", "music"]
 
 # Auth schemas
 class UserCreate(BaseModel):
@@ -76,7 +79,7 @@ class RecommendationResponseDto(BaseModel):
     recommendations: List[RecommendationItemDto]
 
 class RecommendationFeedbackDto(BaseModel):
-    domain: str = "movie"
+    domain: DomainName = "movie"
     userId: int
     itemId: int
     action: str = Field(..., pattern="^(LIKE|DISLIKE)$")
@@ -99,28 +102,33 @@ class DomainListResponseDto(BaseModel):
     domains: List[DomainInfoDto]
 
 # Benchmark & Cold-Start schemas
-class ColdStartMetricDto(BaseModel):
-    interactions: int
-    cf_auc: float
-    cf_f1: float
-    cf_recall10: float
-    cf_ndcg10: float
+class SparsityPointDto(BaseModel):
+    """Test ROC-AUC when only `ratio` of the training interactions is kept."""
+    ratio: float
+    mf_auc: float
+    ripplenet_auc: float
     ckan_auc: float
-    ckan_f1: float
-    ckan_recall10: float
-    ckan_ndcg10: float
-    delta_auc_pct: float
-    delta_recall_pct: float
+
+class ModelResultDto(BaseModel):
+    """Full-data test metrics of one model, as measured in the benchmark notebook."""
+    model: str
+    auc: float
+    f1: float
+    acc: float
+    recall: Dict[str, float]
 
 class ColdStartSimulationResponseDto(BaseModel):
     domain: str
     interactions: int
-    description: str
-    currentMetrics: ColdStartMetricDto
-    trajectory: List[ColdStartMetricDto]
-    cfRecommendations: List[RecommendationItemDto]
+    source: str
+    sparsity: List[SparsityPointDto]
+    # The sparsity AUCs are measured on the users who already have a positive at the lowest ratio.
+    sparsityEvalUsers: Optional[int] = None
+    sparsityEvalRows: Optional[int] = None
+    models: List[ModelResultDto]
+    seedItems: List[str]
+    popularRecommendations: List[RecommendationItemDto]
     ckanRecommendations: List[RecommendationItemDto]
-    explanation: str
 
 # Item Explore schemas
 class ItemDto(BaseModel):
@@ -163,6 +171,7 @@ class ExplanationPathDto(BaseModel):
     id: str
     sourceMovieTitle: str
     relation: str
+    relationLabel: Optional[str] = None
     entityName: str
     targetMovieTitle: str
     naturalLanguage: str
@@ -188,6 +197,7 @@ class UserProfileDto(BaseModel):
     totalLikes: int = 0
     totalDislikes: int = 0
     topGenres: List[str] = Field(default_factory=list)
+    sampleLikes: List[str] = Field(default_factory=list)
 
 class UserListResponse(BaseModel):
     total: int

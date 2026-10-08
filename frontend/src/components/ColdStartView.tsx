@@ -1,476 +1,404 @@
 import React, { useState, useEffect } from "react";
-import {
-  Sliders,
-  TrendingUp,
-  AlertCircle,
-  CheckCircle2,
-  Database,
-  ArrowRight,
-  ShieldCheck,
-  RefreshCw,
-  GitBranch,
-} from "lucide-react";
+import { AlertCircle } from "lucide-react";
 import { api } from "../services/api";
-import { DomainType, ColdStartSimulationResponse } from "../types";
+import { DomainType, ColdStartSimulationResponse, ModelResult, RecommendationItem } from "../types";
+import { BASELINE_HEX, DOMAIN_ACCENT, DOMAIN_META, RIPPLENET_HEX } from "../lib/theme";
+import { cn } from "../lib/utils";
+import { PageHeader } from "./ui";
+import { ChartSeries, TrajectoryChart } from "./TrajectoryChart";
 
 interface ColdStartViewProps {
   domain: DomainType;
-  accentColor: string;
 }
 
-export const ColdStartView: React.FC<ColdStartViewProps> = ({ domain, accentColor }) => {
-  const [interactions, setInteractions] = useState<number>(3);
-  const [data, setData] = useState<ColdStartSimulationResponse | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
+const SEED_STEPS = [1, 2, 3, 5, 10, 20];
+const MODEL_ORDER = ["MostPopular", "MF", "RippleNet", "CKAN"];
 
-  const fetchSimulation = async (count: number) => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const res = await api.simulateColdStart(domain, count);
-      setData(res);
-    } catch (err: any) {
-      console.error(err);
-      setError("Không thể tải dữ liệu thử nghiệm khởi động lạnh.");
-    } finally {
-      setIsLoading(false);
-    }
-  };
+const pct = (ratio: number) => `${Math.round(ratio * 100)}%`;
+const signedPct = (from: number, to: number) => {
+  const delta = ((to - from) / from) * 100;
+  return `${delta >= 0 ? "+" : "−"}${Math.abs(delta).toFixed(1)}%`;
+};
+
+const RecList: React.FC<{ items: RecommendationItem[]; emphasised?: boolean; scoreTitle: string }> = ({
+  items,
+  emphasised,
+  scoreTitle,
+}) => (
+  <ol className="mt-4 divide-y divide-line">
+    {items.map((item, idx) => (
+      <li key={`${item.id}-${idx}`} className="flex items-baseline gap-3 py-2.5">
+        <span className={cn("num w-5 shrink-0 text-xs", emphasised ? "text-accent" : "text-ink-faint")}>
+          {String(idx + 1).padStart(2, "0")}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className={cn("truncate", emphasised ? "font-medium text-ink" : "text-ink-muted")}>{item.title}</p>
+          {item.reasons[0] && <p className="truncate text-[13px] text-ink-faint">{item.reasons[0]}</p>}
+        </div>
+        <span className="num shrink-0 text-xs text-ink-muted" title={scoreTitle}>
+          {(item.score * 100).toFixed(1)}%
+        </span>
+      </li>
+    ))}
+  </ol>
+);
+
+export const ColdStartView: React.FC<ColdStartViewProps> = ({ domain }) => {
+  const [interactions, setInteractions] = useState(3);
+  const [ratioIndex, setRatioIndex] = useState(0);
+  const [data, setData] = useState<ColdStartSimulationResponse | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const meta = DOMAIN_META[domain];
 
   useEffect(() => {
-    fetchSimulation(interactions);
+    let cancelled = false;
+    setIsLoading(true);
+    setError(null);
+    api
+      .simulateColdStart(domain, interactions)
+      .then((res) => !cancelled && setData(res))
+      .catch((err) => !cancelled && setError(err.message || "Không tải được dữ liệu thử nghiệm."))
+      .finally(() => !cancelled && setIsLoading(false));
+    return () => {
+      cancelled = true;
+    };
   }, [domain, interactions]);
 
-  const domainLabels: Record<DomainType, { name: string; sparsity: string; term: string }> = {
-    movie: { name: "Điện ảnh (MovieLens)", sparsity: "99.44%", term: "phim" },
-    book: { name: "Sách (Book-Crossing)", sparsity: "99.94%", term: "cuốn sách" },
-    music: { name: "Âm nhạc (Last.FM)", sparsity: "99.41%", term: "nghệ sĩ" },
-  };
+  const sparsity = data?.sparsity ?? [];
+  const point = sparsity[Math.min(ratioIndex, sparsity.length - 1)];
+  const first = sparsity[0];
+  const last = sparsity[sparsity.length - 1];
+  const models = MODEL_ORDER.map((name) => data?.models.find((m) => m.model === name)).filter(
+    (m): m is ModelResult => !!m
+  );
+  const best = (key: "auc" | "f1" | "acc") => Math.max(...models.map((m) => m[key]));
+  const bestRecall = (k: string) => Math.max(...models.map((m) => m.recall[k] ?? 0));
 
-  const domainInfo = domainLabels[domain];
+  // One sentence on how CKAN and MF compare as data grows, derived from the measured points.
+  const crossover = sparsity.findIndex((_, i) => sparsity.slice(i).every((p) => p.ckan_auc >= p.mf_auc));
+  let trend = "";
+  if (first && last) {
+    const gapFirst = first.ckan_auc - first.mf_auc;
+    const gapLast = last.ckan_auc - last.mf_auc;
+    if (crossover === 0) {
+      trend =
+        gapLast < gapFirst
+          ? "CKAN dẫn trước ở mọi mức; lợi thế lớn nhất lúc thiếu tương tác và thu hẹp dần khi dữ liệu dày lên."
+          : "CKAN dẫn trước ở mọi mức, và khoảng cách rộng ra khi có thêm dữ liệu.";
+    } else if (crossover > 0) {
+      trend = `Lúc thiếu dữ liệu MF tốt hơn; CKAN chỉ vượt lên từ mức ${pct(sparsity[crossover].ratio)}.`;
+    } else {
+      trend = "Khi dữ liệu dày, MF đuổi kịp CKAN; lợi thế của CKAN nằm ở các mức dữ liệu thấp.";
+    }
+  }
+
+  const series: ChartSeries[] = [
+    { key: "ckan", label: "CKAN", legend: "CKAN", color: DOMAIN_ACCENT[domain], values: sparsity.map((p) => p.ckan_auc) },
+    {
+      key: "ripple",
+      label: "RippleNet",
+      legend: "RippleNet",
+      color: RIPPLENET_HEX[domain],
+      dash: "2 4",
+      values: sparsity.map((p) => p.ripplenet_auc),
+    },
+    {
+      key: "mf",
+      label: "MF",
+      legend: "MF (không dùng đồ thị tri thức)",
+      color: BASELINE_HEX,
+      dash: "6 4",
+      values: sparsity.map((p) => p.mf_auc),
+    },
+  ];
 
   return (
-    <div className="space-y-6 pb-12">
-      {/* Header Banner */}
-      <div className="rounded-2xl border border-white/10 bg-[#10121A] p-6 shadow-sm">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 mb-1.5">
-              <span
-                className="px-2.5 py-0.5 rounded-md text-[11px] font-mono font-medium tracking-wide uppercase border"
-                style={{
-                  color: accentColor,
-                  borderColor: `${accentColor}40`,
-                  backgroundColor: `${accentColor}15`,
-                }}
-              >
-                Bài toán 3: Thử nghiệm độ thưa & Khởi động lạnh
-              </span>
-              <span className="text-xs text-slate-400 font-mono">
-                Độ thưa dữ liệu: <strong className="text-slate-200">{domainInfo.sparsity}</strong>
-              </span>
-            </div>
-            <h1 className="text-xl font-bold text-white tracking-tight">
-              Đánh giá suy giảm hiệu năng: Collaborative Filtering vs CKAN
-            </h1>
-            <p className="text-xs text-slate-400 mt-1 max-w-3xl leading-relaxed">
-              Mô phỏng hành vi gợi ý khi người dùng chỉ có rất ít lượt tương tác (1 - 5 {domainInfo.term}).
-              Quan sát trực quan cách mạng lưới Knowledge Graph bù đắp thông tin bị thiếu hụt trên ma trận tương tác.
-            </p>
-          </div>
+    <div>
+      <PageHeader
+        eyebrow={`Bài toán 3 · Độ thưa dữ liệu · ${meta.dataset}`}
+        title="Mô hình chịu thiếu dữ liệu tốt đến đâu"
+        description={
+          <>
+            Ma trận tương tác của tập {meta.dataset} thưa tới <span className="num text-ink">{meta.sparsity}</span>. Thí
+            nghiệm giữ lại 10% đến 100% tập huấn luyện rồi đo ROC-AUC trên cùng một nhóm người dùng, cho MF và hai mô hình
+            dùng đồ thị tri thức là RippleNet và CKAN.
+          </>
+        }
+      />
 
-          <button
-            onClick={() => fetchSimulation(interactions)}
-            disabled={isLoading}
-            className="self-start md:self-auto flex items-center gap-2 px-3.5 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-medium text-slate-200 transition-all active:scale-95 disabled:opacity-50"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? "animate-spin" : ""}`} />
-            <span>Tải lại dữ liệu</span>
-          </button>
+      {error && (
+        <div className="notice notice-error mt-8" role="alert">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-neg" strokeWidth={1.75} />
+          <p>{error}</p>
         </div>
-
-        {/* Interactive Slider Control */}
-        <div className="mt-6 pt-5 border-t border-white/5">
-          <div className="flex items-center justify-between mb-2">
-            <label className="text-xs font-medium text-slate-300 flex items-center gap-2">
-              <Sliders className="w-4 h-4 text-slate-400" />
-              <span>Số lượng tương tác lịch sử giả định (N):</span>
-              <span
-                className="px-2 py-0.5 rounded font-mono font-bold text-xs border"
-                style={{
-                  color: accentColor,
-                  borderColor: `${accentColor}50`,
-                  backgroundColor: `${accentColor}15`,
-                }}
-              >
-                {interactions} {domainInfo.term}
-              </span>
-            </label>
-            <span className="text-[11px] text-slate-400 font-mono">
-              {interactions <= 3 ? "Vùng Khởi động Lạnh cực đoan (Cold-Start)" : "Vùng Dữ liệu thưa tiêu chuẩn"}
-            </span>
-          </div>
-
-          <div className="space-y-2">
-            <input
-              type="range"
-              min="1"
-              max="20"
-              value={interactions}
-              onChange={(e) => setInteractions(parseInt(e.target.value, 10))}
-              className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-primary"
-              style={{ accentColor }}
-            />
-            <div className="flex justify-between text-[11px] text-slate-400 font-mono">
-              <button
-                onClick={() => setInteractions(1)}
-                className={`hover:text-white transition-colors ${interactions === 1 ? "text-white font-bold" : ""}`}
-              >
-                1 (Cực thưa)
-              </button>
-              <button
-                onClick={() => setInteractions(3)}
-                className={`hover:text-white transition-colors ${interactions === 3 ? "text-white font-bold" : ""}`}
-              >
-                3 (Cold-Start)
-              </button>
-              <button
-                onClick={() => setInteractions(5)}
-                className={`hover:text-white transition-colors ${interactions === 5 ? "text-white font-bold" : ""}`}
-              >
-                5
-              </button>
-              <button
-                onClick={() => setInteractions(10)}
-                className={`hover:text-white transition-colors ${interactions === 10 ? "text-white font-bold" : ""}`}
-              >
-                10 (10% Data)
-              </button>
-              <button
-                onClick={() => setInteractions(20)}
-                className={`hover:text-white transition-colors ${interactions === 20 ? "text-white font-bold" : ""}`}
-              >
-                20 (Bão hòa)
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+      )}
 
       {isLoading && !data && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 animate-pulse">
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="h-28 rounded-2xl bg-white/5 border border-white/5" />
+        <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-3" aria-busy="true">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="skeleton h-24" />
           ))}
         </div>
       )}
 
-      {error && (
-        <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs flex items-center gap-2">
-          <AlertCircle className="w-4 h-4 shrink-0" />
-          <span>{error}</span>
+      {data && sparsity.length === 0 && (
+        <div className="notice mt-8">
+          <p>
+            Backend chưa có số liệu benchmark cho tập này. Chạy{" "}
+            <span className="num">python -m app.scripts.extract_benchmark_results</span> sau khi chạy notebook.
+          </p>
         </div>
       )}
 
-      {data && (
+      {data && point && first && last && (
         <>
-          {/* Bento Grid: 4 Metric Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* Metric 1: ROC-AUC */}
-            <div className="p-4 rounded-2xl bg-[#10121A] border border-white/10 space-y-2">
-              <div className="flex items-center justify-between text-xs text-slate-400">
-                <span>ROC-AUC</span>
-                <span className="font-mono font-bold text-emerald-400 text-[11px] bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
-                  +{data.currentMetrics.delta_auc_pct}%
-                </span>
-              </div>
-              <div className="flex items-baseline justify-between pt-1">
-                <div>
-                  <span className="text-[10px] text-slate-400 block font-mono">CF Baseline</span>
-                  <span className="font-mono font-bold text-lg text-slate-400">
-                    {data.currentMetrics.cf_auc.toFixed(4)}
-                  </span>
-                </div>
-                <ArrowRight className="w-4 h-4 text-slate-600 mb-1" />
-                <div className="text-right">
-                  <span className="text-[10px] block font-mono" style={{ color: accentColor }}>
-                    CKAN (KG)
-                  </span>
-                  <span className="font-mono font-bold text-xl text-white">
-                    {data.currentMetrics.ckan_auc.toFixed(4)}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Metric 2: Recall@10 */}
-            <div className="p-4 rounded-2xl bg-[#10121A] border border-white/10 space-y-2">
-              <div className="flex items-center justify-between text-xs text-slate-400">
-                <span>Recall@10</span>
-                <span className="font-mono font-bold text-emerald-400 text-[11px] bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
-                  +{data.currentMetrics.delta_recall_pct}%
-                </span>
-              </div>
-              <div className="flex items-baseline justify-between pt-1">
-                <div>
-                  <span className="text-[10px] text-slate-400 block font-mono">CF Baseline</span>
-                  <span className="font-mono font-bold text-lg text-slate-400">
-                    {data.currentMetrics.cf_recall10.toFixed(4)}
-                  </span>
-                </div>
-                <ArrowRight className="w-4 h-4 text-slate-600 mb-1" />
-                <div className="text-right">
-                  <span className="text-[10px] block font-mono" style={{ color: accentColor }}>
-                    CKAN (KG)
-                  </span>
-                  <span className="font-mono font-bold text-xl text-white">
-                    {data.currentMetrics.ckan_recall10.toFixed(4)}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Metric 3: F1-Score */}
-            <div className="p-4 rounded-2xl bg-[#10121A] border border-white/10 space-y-2">
-              <div className="flex items-center justify-between text-xs text-slate-400">
-                <span>F1-Score</span>
-                <span className="font-mono text-slate-400 text-[11px]">Độ đo cân bằng</span>
-              </div>
-              <div className="flex items-baseline justify-between pt-1">
-                <div>
-                  <span className="text-[10px] text-slate-400 block font-mono">CF Baseline</span>
-                  <span className="font-mono font-bold text-lg text-slate-400">
-                    {data.currentMetrics.cf_f1.toFixed(4)}
-                  </span>
-                </div>
-                <ArrowRight className="w-4 h-4 text-slate-600 mb-1" />
-                <div className="text-right">
-                  <span className="text-[10px] block font-mono" style={{ color: accentColor }}>
-                    CKAN (KG)
-                  </span>
-                  <span className="font-mono font-bold text-xl text-white">
-                    {data.currentMetrics.ckan_f1.toFixed(4)}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Metric 4: NDCG@10 */}
-            <div className="p-4 rounded-2xl bg-[#10121A] border border-white/10 space-y-2">
-              <div className="flex items-center justify-between text-xs text-slate-400">
-                <span>NDCG@10</span>
-                <span className="font-mono text-slate-400 text-[11px]">Chất lượng thứ hạng</span>
-              </div>
-              <div className="flex items-baseline justify-between pt-1">
-                <div>
-                  <span className="text-[10px] text-slate-400 block font-mono">CF Baseline</span>
-                  <span className="font-mono font-bold text-lg text-slate-400">
-                    {data.currentMetrics.cf_ndcg10.toFixed(4)}
-                  </span>
-                </div>
-                <ArrowRight className="w-4 h-4 text-slate-600 mb-1" />
-                <div className="text-right">
-                  <span className="text-[10px] block font-mono" style={{ color: accentColor }}>
-                    CKAN (KG)
-                  </span>
-                  <span className="font-mono font-bold text-xl text-white">
-                    {data.currentMetrics.ckan_ndcg10.toFixed(4)}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Technical Analysis & Explanation Card */}
-          <div className="rounded-2xl border border-white/10 bg-[#10121A] p-5">
-            <div className="flex items-start gap-3">
-              <div
-                className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border"
-                style={{
-                  color: accentColor,
-                  borderColor: `${accentColor}40`,
-                  backgroundColor: `${accentColor}15`,
-                }}
-              >
-                <GitBranch className="w-4 h-4" />
-              </div>
-              <div>
-                <h3 className="text-xs font-bold text-white uppercase tracking-wider font-mono">
-                  Nguyên lý khắc phục điểm nghẽn độ thưa (Sparsity Bottleneck)
-                </h3>
-                <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                  {data.explanation}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Side-by-Side Live Recommendations Simulation */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Left: CF Baseline Recommendations */}
-            <div className="rounded-2xl border border-white/10 bg-[#10121A] p-5 space-y-4">
-              <div className="flex items-center justify-between border-b border-white/5 pb-3">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-slate-500" />
-                  <h3 className="text-sm font-bold text-white">Collaborative Filtering (CF Baseline)</h3>
-                </div>
-                <span className="text-[11px] font-mono text-slate-400 bg-white/5 px-2 py-0.5 rounded">
-                  Chỉ dùng ma trận tương tác
-                </span>
-              </div>
-
-              <div className="space-y-2.5">
-                {data.cfRecommendations.map((item, idx) => (
-                  <div
-                    key={idx}
-                    className="p-3 rounded-xl bg-white/[0.02] border border-white/5 flex items-center justify-between gap-3 text-xs"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span className="font-mono text-slate-400 text-xs w-4">#{idx + 1}</span>
-                      <div className="min-w-0">
-                        <p className="font-medium text-slate-300 truncate">{item.title}</p>
-                        <p className="text-[11px] text-slate-400 truncate">
-                          {item.reasons[0] || "Gợi ý đại trà mặc định"}
-                        </p>
-                      </div>
-                    </div>
-                    <span className="font-mono text-[11px] text-slate-400 px-2 py-0.5 rounded bg-slate-800/80 shrink-0">
-                      {(item.score * 100).toFixed(1)}%
-                    </span>
-                  </div>
-                ))}
-              </div>
-
-              <div className="p-3 rounded-xl bg-slate-900/60 border border-white/5 text-[11px] text-slate-400 flex items-start gap-2">
-                <AlertCircle className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
-                <span>
-                  Hạn chế: CF dựa vào các cặp user có chung đánh giá. Với {interactions} tương tác,
-                  vector đặc trưng không tìm được điểm giao, dẫn đến gợi ý sản phẩm ngẫu nhiên hoặc đại trà.
-                </span>
-              </div>
-            </div>
-
-            {/* Right: CKAN Recommendations */}
-            <div
-              className="rounded-2xl border p-5 space-y-4 bg-[#10121A]"
-              style={{ borderColor: `${accentColor}30` }}
-            >
-              <div className="flex items-center justify-between border-b border-white/5 pb-3">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: accentColor }} />
-                  <h3 className="text-sm font-bold text-white">CKAN (Collaborative Knowledge Attention)</h3>
-                </div>
-                <span
-                  className="text-[11px] font-mono px-2 py-0.5 rounded border"
-                  style={{
-                    color: accentColor,
-                    borderColor: `${accentColor}40`,
-                    backgroundColor: `${accentColor}15`,
-                  }}
+          <div className="mt-7 flex flex-wrap items-center gap-x-4 gap-y-2">
+            <span id="ratio-label" className="text-sm text-ink-muted">
+              Phần tập huấn luyện được giữ lại
+            </span>
+            <div className="seg" role="group" aria-labelledby="ratio-label">
+              {sparsity.map((p, i) => (
+                <button
+                  key={p.ratio}
+                  onClick={() => setRatioIndex(i)}
+                  aria-pressed={ratioIndex === i}
+                  className="seg-item num min-w-12 justify-center"
                 >
-                  Lan truyền KG Attention
-                </span>
-              </div>
-
-              <div className="space-y-2.5">
-                {data.ckanRecommendations.map((item, idx) => (
-                  <div
-                    key={idx}
-                    className="p-3 rounded-xl bg-white/[0.03] border border-white/5 flex items-center justify-between gap-3 text-xs"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span className="font-mono text-xs w-4" style={{ color: accentColor }}>
-                        #{idx + 1}
-                      </span>
-                      <div className="min-w-0">
-                        <p className="font-medium text-white truncate">{item.title}</p>
-                        <p className="text-[11px] text-slate-400 truncate">
-                          {item.reasons[0] || "Kết nối tri thức qua mạng KG"}
-                        </p>
-                      </div>
-                    </div>
-                    <span
-                      className="font-mono text-[11px] font-bold px-2 py-0.5 rounded border shrink-0"
-                      style={{
-                        color: accentColor,
-                        borderColor: `${accentColor}40`,
-                        backgroundColor: `${accentColor}15`,
-                      }}
-                    >
-                      {(item.score * 100).toFixed(1)}%
-                    </span>
-                  </div>
-                ))}
-              </div>
-
-              <div className="p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20 text-[11px] text-emerald-300 flex items-start gap-2">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
-                <span>
-                  Ưu thế: Ngay cả khi chỉ có {interactions} tương tác, CKAN vẫn truy xuất các thuộc tính liên quan
-                  trên đồ thị tri thức để tìm ra các sản phẩm cùng nhóm tác giả, đạo diễn hoặc phong cách.
-                </span>
-              </div>
+                  {pct(p.ratio)}
+                </button>
+              ))}
             </div>
           </div>
 
-          {/* Benchmark Trajectory Table */}
-          <div className="rounded-2xl border border-white/10 bg-[#10121A] p-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-bold text-white">
-                  Bảng thông số thực nghiệm theo số lượng tương tác (N = 1 đến 20)
-                </h3>
-                <p className="text-[11px] text-slate-400 mt-0.5">
-                  Đo đạc thực tế trên tập kiểm thử độc lập của dataset {domainInfo.name}
-                </p>
+          {/* Headline: test AUC at the selected ratio */}
+          <dl className="mt-6 grid grid-cols-1 border-y border-line sm:grid-cols-3">
+            {[
+              { name: "CKAN", value: point.ckan_auc, main: true },
+              { name: "RippleNet", value: point.ripplenet_auc, main: false },
+              { name: "MF", value: point.mf_auc, main: false },
+            ].map((m, i) => (
+              <div key={m.name} className={cn("py-6 pr-4", i > 0 && "border-t border-line sm:border-l sm:border-t-0 sm:pl-6")}>
+                <dt className="text-[13px] text-ink-muted">
+                  ROC-AUC của {m.name} với {pct(point.ratio)} dữ liệu
+                </dt>
+                <dd className="mt-1 flex flex-wrap items-baseline gap-x-2.5">
+                  <span className={cn("num text-3xl tracking-tight", m.main ? "text-ink" : "text-ink-muted")}>
+                    {m.value.toFixed(4)}
+                  </span>
+                  {m.name !== "MF" && (
+                    <span className={cn("num text-sm", m.value >= point.mf_auc ? "text-pos" : "text-neg")}>
+                      {signedPct(point.mf_auc, m.value)} so với MF
+                    </span>
+                  )}
+                </dd>
               </div>
-            </div>
+            ))}
+          </dl>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs text-left">
-                <thead className="text-[11px] text-slate-400 border-b border-white/5 font-mono uppercase">
-                  <tr>
-                    <th className="py-2.5 px-3">Tương tác (N)</th>
-                    <th className="py-2.5 px-3">CF AUC</th>
-                    <th className="py-2.5 px-3">CKAN AUC</th>
-                    <th className="py-2.5 px-3 text-emerald-400">Δ AUC (%)</th>
-                    <th className="py-2.5 px-3">CF Recall@10</th>
-                    <th className="py-2.5 px-3">CKAN Recall@10</th>
-                    <th className="py-2.5 px-3 text-emerald-400">Δ Recall (%)</th>
-                    <th className="py-2.5 px-3">CKAN NDCG@10</th>
+          <div className="mt-10 grid gap-10 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
+            <section aria-labelledby="chart-title">
+              <h2 id="chart-title" className="mb-5 text-xl font-semibold tracking-tight">
+                ROC-AUC theo lượng dữ liệu huấn luyện
+              </h2>
+              <TrajectoryChart
+                series={series}
+                xLabels={sparsity.map((p) => pct(p.ratio))}
+                xTitle="Tập huấn luyện được giữ lại"
+                selectedIndex={ratioIndex}
+                onSelect={setRatioIndex}
+                ariaLabel="ROC-AUC của CKAN, RippleNet và MF theo phần tập huấn luyện được giữ lại. Số liệu đầy đủ ở bảng bên dưới."
+              />
+            </section>
+
+            <section aria-labelledby="read-title" className="lg:border-l lg:border-line lg:pl-10">
+              <h2 id="read-title" className="text-xl font-semibold tracking-tight">
+                Đọc kết quả
+              </h2>
+              <ul className="mt-3 space-y-3 text-ink-muted">
+                <li>
+                  Chỉ với {pct(first.ratio)} dữ liệu, CKAN đạt <span className="num text-ink">{first.ckan_auc.toFixed(4)}</span>,
+                  MF đạt <span className="num text-ink">{first.mf_auc.toFixed(4)}</span>: chênh{" "}
+                  <span className="num text-ink">{signedPct(first.mf_auc, first.ckan_auc)}</span>.
+                </li>
+                <li>
+                  Với đủ {pct(last.ratio)} dữ liệu, chênh lệch là{" "}
+                  <span className="num text-ink">{signedPct(last.mf_auc, last.ckan_auc)}</span> (CKAN{" "}
+                  <span className="num">{last.ckan_auc.toFixed(4)}</span>, MF <span className="num">{last.mf_auc.toFixed(4)}</span>
+                  ). {trend}
+                </li>
+                <li>
+                  So với RippleNet ở mức {pct(first.ratio)}: CKAN{" "}
+                  {first.ckan_auc >= first.ripplenet_auc ? "cao hơn" : "thấp hơn"} (
+                  <span className="num">{first.ckan_auc.toFixed(4)}</span> và{" "}
+                  <span className="num">{first.ripplenet_auc.toFixed(4)}</span>).
+                </li>
+              </ul>
+              <p className="mt-4 text-[13px] text-ink-faint">
+                Ở mỗi mức, lịch sử người dùng và các tập bộ ba được dựng lại chỉ từ phần dữ liệu được giữ.
+                {data.sparsityEvalUsers != null && (
+                  <>
+                    {" "}AUC đo trên <span className="num">{data.sparsityEvalUsers.toLocaleString("vi-VN")}</span> người
+                    dùng đã có lượt thích ở mức {pct(first.ratio)}
+                    {data.sparsityEvalRows != null && (
+                      <>
+                        {" "}(<span className="num">{data.sparsityEvalRows.toLocaleString("vi-VN")}</span> mẫu kiểm thử)
+                      </>
+                    )}
+                    .
+                  </>
+                )}
+                {data.source && (
+                  <>
+                    {" "}Số đo lấy nguyên từ notebook <span className="num">{data.source}</span>.
+                  </>
+                )}
+              </p>
+            </section>
+          </div>
+
+          <section className="mt-14 border-t border-line pt-10" aria-labelledby="sparsity-table">
+            <h2 id="sparsity-table" className="text-xl font-semibold tracking-tight">
+              ROC-AUC tại từng mức dữ liệu
+            </h2>
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full min-w-[560px] text-sm">
+                <thead>
+                  <tr className="border-b border-line text-[13px] text-ink-faint">
+                    <th scope="col" className="py-2.5 pl-3 pr-4 text-left font-normal">Dữ liệu huấn luyện</th>
+                    <th scope="col" className="px-4 py-2.5 text-right font-normal">MF</th>
+                    <th scope="col" className="px-4 py-2.5 text-right font-normal">RippleNet</th>
+                    <th scope="col" className="px-4 py-2.5 text-right font-normal">CKAN</th>
+                    <th scope="col" className="py-2.5 pl-4 pr-3 text-right font-normal">CKAN so với MF</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-white/5 font-mono">
-                  {data.trajectory.map((row, idx) => {
-                    const isSelected = row.interactions === interactions;
-                    return (
-                      <tr
-                        key={idx}
-                        className={`transition-colors ${
-                          isSelected ? "bg-white/[0.06] font-semibold" : "hover:bg-white/[0.02]"
-                        }`}
-                      >
-                        <td className="py-2.5 px-3 flex items-center gap-1.5">
-                          {isSelected && (
-                            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: accentColor }} />
-                          )}
-                          <span>N = {row.interactions}</span>
-                        </td>
-                        <td className="py-2.5 px-3 text-slate-400">{row.cf_auc.toFixed(4)}</td>
-                        <td className="py-2.5 px-3 text-white">{row.ckan_auc.toFixed(4)}</td>
-                        <td className="py-2.5 px-3 text-emerald-400 font-bold">+{row.delta_auc_pct}%</td>
-                        <td className="py-2.5 px-3 text-slate-400">{row.cf_recall10.toFixed(4)}</td>
-                        <td className="py-2.5 px-3 text-white">{row.ckan_recall10.toFixed(4)}</td>
-                        <td className="py-2.5 px-3 text-emerald-400 font-bold">+{row.delta_recall_pct}%</td>
-                        <td className="py-2.5 px-3 text-slate-300">{row.ckan_ndcg10.toFixed(4)}</td>
-                      </tr>
-                    );
-                  })}
+                <tbody className="num">
+                  {sparsity.map((row, i) => (
+                    <tr
+                      key={row.ratio}
+                      onClick={() => setRatioIndex(i)}
+                      aria-selected={i === ratioIndex}
+                      className={cn(
+                        "cursor-pointer border-b border-line transition-colors duration-200",
+                        i === ratioIndex ? "bg-accent/10 text-ink" : "text-ink-muted hover:bg-surface"
+                      )}
+                    >
+                      <th scope="row" className="py-2.5 pl-3 pr-4 text-left font-normal text-ink">{pct(row.ratio)}</th>
+                      <td className="px-4 py-2.5 text-right">{row.mf_auc.toFixed(4)}</td>
+                      <td className="px-4 py-2.5 text-right">{row.ripplenet_auc.toFixed(4)}</td>
+                      <td className="px-4 py-2.5 text-right text-ink">{row.ckan_auc.toFixed(4)}</td>
+                      <td className={cn("py-2.5 pl-4 pr-3 text-right", row.ckan_auc >= row.mf_auc ? "text-pos" : "text-neg")}>
+                        {signedPct(row.mf_auc, row.ckan_auc)}
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
-          </div>
+          </section>
+
+          {models.length > 0 && (
+            <section className="mt-14 border-t border-line pt-10" aria-labelledby="full-table">
+              <h2 id="full-table" className="text-xl font-semibold tracking-tight">
+                Kết quả với toàn bộ dữ liệu
+              </h2>
+              <p className="mt-1 max-w-[64ch] text-[13px] text-ink-muted">
+                Bốn mô hình trên cùng tập kiểm thử. Giá trị tốt nhất mỗi cột được tô sáng; MostPopular không cá nhân hoá
+                nên F1 thấp dù AUC có thể cao.
+              </p>
+              <div className="mt-4 overflow-x-auto">
+                <table className="w-full min-w-[640px] text-sm">
+                  <thead>
+                    <tr className="border-b border-line text-[13px] text-ink-faint">
+                      <th scope="col" className="py-2.5 pl-3 pr-4 text-left font-normal">Mô hình</th>
+                      <th scope="col" className="px-4 py-2.5 text-right font-normal">ROC-AUC</th>
+                      <th scope="col" className="px-4 py-2.5 text-right font-normal">F1</th>
+                      <th scope="col" className="px-4 py-2.5 text-right font-normal">Accuracy</th>
+                      <th scope="col" className="px-4 py-2.5 text-right font-normal">Recall@10</th>
+                      <th scope="col" className="py-2.5 pl-4 pr-3 text-right font-normal">Recall@50</th>
+                    </tr>
+                  </thead>
+                  <tbody className="num">
+                    {models.map((m) => {
+                      const cell = (value: number, top: number) => (
+                        <td className={cn("px-4 py-2.5 text-right last:pr-3", value === top ? "font-medium text-ink" : "text-ink-muted")}>
+                          {value.toFixed(4)}
+                        </td>
+                      );
+                      return (
+                        <tr key={m.model} className="border-b border-line">
+                          <th scope="row" className="py-2.5 pl-3 pr-4 text-left font-sans font-normal text-ink">{m.model}</th>
+                          {cell(m.auc, best("auc"))}
+                          {cell(m.f1, best("f1"))}
+                          {cell(m.acc, best("acc"))}
+                          {cell(m.recall["10"] ?? 0, bestRecall("10"))}
+                          {cell(m.recall["50"] ?? 0, bestRecall("50"))}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
+
+          <section className="mt-14 border-t border-line pt-10" aria-labelledby="live-title">
+            <div className="flex flex-wrap items-end justify-between gap-4">
+              <div>
+                <h2 id="live-title" className="text-xl font-semibold tracking-tight">
+                  Thử trực tiếp: người dùng chỉ có vài lượt thích
+                </h2>
+                <p className="mt-1 max-w-[64ch] text-[13px] text-ink-muted">
+                  Phần này mô hình chạy ngay lúc bạn bấm. Chỉ giữ N lượt thích đầu của người dùng mẫu #
+                  {meta.defaultUser}, rồi so danh sách phổ biến nhất với gợi ý của CKAN.
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <span id="n-label" className="text-sm text-ink-muted">
+                  Số lượt thích (N)
+                </span>
+                <div className="seg" role="group" aria-labelledby="n-label">
+                  {SEED_STEPS.map((n) => (
+                    <button
+                      key={n}
+                      onClick={() => setInteractions(n)}
+                      aria-pressed={interactions === n}
+                      className="seg-item num min-w-10 justify-center"
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {data.seedItems.length > 0 && (
+              <p className="mt-4 text-[13px] text-ink-muted">
+                <span className="text-ink-faint">Đã thích: </span>
+                {data.seedItems.slice(0, 6).join(" · ")}
+                {data.seedItems.length > 6 && ` · và ${data.seedItems.length - 6} mục khác`}
+              </p>
+            )}
+
+            <div className={cn("mt-6 grid gap-x-10 gap-y-10 transition-opacity duration-300 lg:grid-cols-2", isLoading && "opacity-60")}>
+              <div className="min-w-0">
+                <h3 className="text-lg font-semibold tracking-tight">Phổ biến nhất</h3>
+                <p className="mt-1 text-[13px] text-ink-muted">
+                  Không cá nhân hoá: ai cũng nhận danh sách này, bất kể đã thích gì. Cột phải là tỷ lệ người dùng đã
+                  thích.
+                </p>
+                <RecList items={data.popularRecommendations} scoreTitle="Tỷ lệ người dùng trong tập dữ liệu đã thích" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-lg font-semibold tracking-tight">CKAN</h3>
+                <p className="mt-1 text-[13px] text-ink-muted">
+                  Từ {data.seedItems.length} {meta.item} trên, CKAN đi theo các quan hệ trong đồ thị tri thức. Cột phải
+                  là điểm dự đoán của mô hình.
+                </p>
+                <RecList items={data.ckanRecommendations} emphasised scoreTitle="Điểm dự đoán của CKAN" />
+              </div>
+            </div>
+          </section>
         </>
       )}
     </div>

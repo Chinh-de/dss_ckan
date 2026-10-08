@@ -98,3 +98,10 @@ Thumbs.db
 
 .agent/
 .agents/
+
+# 7. Notebook exports and report scratch files
+saved_models/
+results.zip
+~*.tmp
+~$*
+docs/report/screens/

@@ -3,70 +3,152 @@
 @tailwind utilities;
 
 @layer base {
+  /* One warm-neutral gray family, one accent. The accent follows the active dataset. */
   :root {
-    --background: 240 25% 4%;
-    --foreground: 210 40% 98%;
-    --card: 240 25% 7%;
-    --card-foreground: 210 40% 98%;
-    --popover: 240 25% 7%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 38 79% 57%;
-    --primary-foreground: 240 25% 4%;
-    --secondary: 240 20% 16%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 240 20% 12%;
-    --muted-foreground: 215 20% 65%;
-    --accent: 359 67% 54%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 240 20% 16%;
-    --input: 240 20% 16%;
-    --ring: 38 79% 57%;
+    --bg: 14 13 12;
+    --surface: 22 21 19;
+    --raised: 32 30 27;
+    --ink: 237 233 227;
+    --ink-muted: 171 164 154;
+    --ink-faint: 128 122 113;
+    --line: 255 244 230;
+    --accent: 204 142 38;
+    --accent-ink: 22 15 4;
+    --pos: 99 184 136;
+    --neg: 222 110 100;
+    color-scheme: dark;
+  }
+  :root[data-domain="book"] {
+    --accent: 63 168 119;
+    --accent-ink: 4 20 13;
+  }
+  :root[data-domain="music"] {
+    --accent: 61 156 201;
+    --accent-ink: 3 16 24;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-bg text-ink font-sans antialiased;
+    font-size: 0.9375rem;
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+
+  /* Film-grain layer so large dark areas do not read as flat fills. */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    opacity: 0.05;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  h1,
+  h2,
+  h3 {
+    @apply font-display;
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  ::selection {
+    background: rgb(var(--accent) / 0.3);
+  }
+
+  :focus-visible {
+    outline: 2px solid rgb(var(--accent));
+    outline-offset: 2px;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(var(--line) / 0.14);
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--line) / 0.26);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-delay: 0ms !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 }
 
-body {
-  background-color: #090A0F;
-  color: #F1F5F9;
-  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
-  overflow-x: hidden;
-}
+@layer components {
+  .eyebrow {
+    @apply text-[13px] font-medium text-accent;
+  }
 
-/* Custom subtle scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  background: #090A0F;
-}
-::-webkit-scrollbar-thumb {
-  background: #1E2333;
-  border-radius: 9999px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #E5A93C;
-}
+  .num {
+    @apply font-mono;
+    font-variant-numeric: tabular-nums;
+  }
 
-/* Glassmorphism utility */
-.glass-panel {
-  background: rgba(17, 20, 30, 0.75);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.07);
-}
+  .btn {
+    @apply inline-flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-lg px-3.5 text-sm font-medium transition duration-200 active:translate-y-px disabled:pointer-events-none disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply bg-accent font-semibold text-accent-ink hover:brightness-110;
+  }
+  .btn-ghost {
+    @apply border border-line-strong text-ink hover:bg-raised;
+  }
+  .btn-quiet {
+    @apply text-ink-muted hover:bg-raised hover:text-ink;
+  }
+  .icon-btn {
+    @apply inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-ink-muted transition duration-200 hover:bg-raised hover:text-ink active:translate-y-px disabled:pointer-events-none disabled:opacity-40;
+  }
 
-.glass-card {
-  background: rgba(17, 20, 30, 0.85);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-}
+  /* Segmented control: mark the active item with aria-pressed or aria-selected. */
+  .seg {
+    @apply inline-flex items-center rounded-lg border border-line bg-surface p-0.5;
+  }
+  .seg-item {
+    @apply inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-md px-3 text-sm text-ink-muted transition duration-200 hover:text-ink;
+  }
+  .seg-item[aria-pressed="true"],
+  .seg-item[aria-selected="true"] {
+    @apply bg-raised font-medium text-ink;
+    box-shadow: inset 0 1px 0 rgb(var(--line) / 0.08);
+  }
 
-.glass-card:hover {
-  border-color: rgba(229, 169, 60, 0.35);
-  transform: translateY(-2px);
-  box-shadow: 0 12px 30px -10px rgba(0, 0, 0, 0.7), 0 0 20px -5px rgba(229, 169, 60, 0.15);
-}
+  .field {
+    @apply h-9 w-full rounded-lg border border-line bg-surface px-3 text-sm text-ink transition duration-200 placeholder:text-ink-faint focus:border-accent focus:outline-none;
+  }
 
+  .notice {
+    @apply flex items-start gap-2.5 rounded-lg border border-line bg-surface px-3.5 py-3 text-sm text-ink-muted;
+  }
+  .notice-error {
+    @apply border-neg/30 bg-neg/10 text-ink;
+  }
+
+  .skeleton {
+    @apply animate-pulse rounded-lg bg-raised;
+  }
+}

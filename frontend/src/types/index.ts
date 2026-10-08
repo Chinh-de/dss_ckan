@@ -61,6 +61,7 @@ export interface ExplanationPath {
   id: string;
   sourceMovieTitle: string;
   relation: string;
+  relationLabel?: string;
   entityName: string;
   targetMovieTitle: string;
   naturalLanguage: string;
@@ -99,30 +100,33 @@ export interface SubgraphData {
   edges: GraphEdge[];
 }
 
-// Cold-Start & Sparsity Benchmark Simulation
-export interface ColdStartMetrics {
-  interactions: number;
-  cf_auc: number;
-  cf_f1: number;
-  cf_recall10: number;
-  cf_ndcg10: number;
+// Sparsity benchmark (measured in the notebook) and the live few-likes comparison
+export interface SparsityPoint {
+  ratio: number;
+  mf_auc: number;
+  ripplenet_auc: number;
   ckan_auc: number;
-  ckan_f1: number;
-  ckan_recall10: number;
-  ckan_ndcg10: number;
-  delta_auc_pct: number;
-  delta_recall_pct: number;
+}
+
+export interface ModelResult {
+  model: string;
+  auc: number;
+  f1: number;
+  acc: number;
+  recall: Record<string, number>;
 }
 
 export interface ColdStartSimulationResponse {
   domain: DomainType;
   interactions: number;
-  description: string;
-  currentMetrics: ColdStartMetrics;
-  trajectory: ColdStartMetrics[];
-  cfRecommendations: RecommendationItem[];
+  source: string;
+  sparsity: SparsityPoint[];
+  sparsityEvalUsers?: number | null;
+  sparsityEvalRows?: number | null;
+  models: ModelResult[];
+  seedItems: string[];
+  popularRecommendations: RecommendationItem[];
   ckanRecommendations: RecommendationItem[];
-  explanation: string;
 }
 
 // Catalog Items
@@ -159,6 +163,7 @@ export interface UserProfile {
   totalLikes: number;
   totalDislikes: number;
   topGenres: string[];
+  sampleLikes?: string[];
 }
 
 export interface UserListResponse {

@@ -27,3 +27,10 @@ models/cache/*.npy
 !models/.gitkeep
 !models/cache/.gitkeep
 
+
+# Likes/hides recorded from the demo UI
+data/session_feedback.json
+data/session_feedback.json.tmp
+
+# Wikidata lookups cached by app/scripts/build_entity_names.py
+models/cache/wikidata_credits.json

@@ -1,0 +1,23 @@
+{
+  "datasets": [
+    "MovieLens-20M",
+    "Book-Crossing",
+    "Last.FM"
+  ],
+  "median_triples_per_item": [
+    25.0,
+    1.0,
+    1.0
+  ],
+  "tails_with_next_hop_pct": [
+    0.0,
+    93.36837900867123,
+    0.48674959437533805
+  ],
+  "top10_with_kg_path_pct": [
+    99.66666666666667,
+    40.0,
+    25.833333333333336
+  ],
+  "users_sampled": 60
+}

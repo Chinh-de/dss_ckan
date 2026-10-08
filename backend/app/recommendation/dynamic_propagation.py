@@ -14,11 +14,14 @@ def generate_user_triple_set(
     kg_dict: Dict[int, List[Tuple[int, int]]],
     n_layer: int = 1,
     set_size: int = 32,
-    fallback_items: List[int] = None
+    fallback_items: List[int] = None,
+    rng: np.random.RandomState = None
 ) -> List[Tuple[List[int], List[int], List[int]]]:
     if not liked_items:
         liked_items = fallback_items or [0]
 
+    # A caller-supplied generator makes the sample repeatable for the same user and likes.
+    rng = rng or np.random
     triple_set = []
     entities = liked_items
 
@@ -42,7 +45,7 @@ def generate_user_triple_set(
                 triple_set.append((dummy_h, dummy_r, dummy_t))
         else:
             replace = len(h) < set_size
-            indices = np.random.choice(len(h), size=set_size, replace=replace)
+            indices = rng.choice(len(h), size=set_size, replace=replace)
             h_sampled = [h[i] for i in indices]
             r_sampled = [r[i] for i in indices]
             t_sampled = [t[i] for i in indices]

@@ -1,378 +1,308 @@
-import React, { useState, useEffect } from "react";
-import { Search, UserCheck, X, Sparkles, ThumbsUp, ThumbsDown, Star, Check, UserPlus, ArrowRight } from "lucide-react";
-import { UserProfile } from "../types";
+import React, { useEffect, useState } from "react";
+import * as Dialog from "@radix-ui/react-dialog";
+import { AlertCircle, ArrowRight, Check, Search, UserPlus, X } from "lucide-react";
+import { DomainType, UserProfile } from "../types";
 import { api } from "../services/api";
+import { DOMAIN_META } from "../lib/theme";
+import { cn } from "../lib/utils";
 
 interface UserSelectModalProps {
-  isOpen: boolean;
+  open: boolean;
   onClose: () => void;
-  domain?: string;
+  domain: DomainType;
   currentUserId: number;
   onSelectUser: (userId: number) => void;
-  onUserCreated?: (newUserId: number) => void;
 }
 
-// Curated showcase users with diverse profiles per domain
-const DOMAIN_SHOWCASE_IDS: Record<string, number[]> = {
-  movie: [1, 375, 551, 1665, 2244],
-  book: [790, 6486, 10029, 12762, 1],
-  music: [774, 79, 238, 386, 1],
-};
+type ListMode = "showcase" | "all";
 
-export const UserSelectModal: React.FC<UserSelectModalProps> = ({
-  isOpen,
-  onClose,
-  domain = "movie",
-  currentUserId,
-  onSelectUser,
-  onUserCreated,
-}) => {
+export const UserSelectModal: React.FC<UserSelectModalProps> = ({ open, onClose, domain, currentUserId, onSelectUser }) => {
   const [searchQuery, setSearchQuery] = useState("");
-  const [customIdInput, setCustomIdInput] = useState("");
   const [users, setUsers] = useState<UserProfile[]>([]);
+  const [total, setTotal] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
-  const [filterMode, setFilterMode] = useState<"showcase" | "all">("showcase");
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [mode, setMode] = useState<ListMode>("showcase");
 
-  // Create User Form State
   const [isCreating, setIsCreating] = useState(false);
   const [newName, setNewName] = useState("");
   const [newEmail, setNewEmail] = useState("");
-  const [creatingLoading, setCreatingLoading] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  const meta = DOMAIN_META[domain];
+  const query = searchQuery.trim();
+  const numericId = /^\d+$/.test(query) ? parseInt(query, 10) : null;
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!open) return;
+    let cancelled = false;
 
     const fetchUsers = async () => {
       setLoading(true);
+      setLoadError(null);
       try {
-        if (searchQuery.trim()) {
-          const res = await api.getUsers(1, 25, searchQuery.trim());
+        if (query) {
+          const res = await api.getUsers(1, 25, query, domain);
+          if (cancelled) return;
           setUsers(res.users || []);
-        } else if (filterMode === "showcase") {
-          // Fetch showcase active users for the current domain
-          const showcaseIds = DOMAIN_SHOWCASE_IDS[domain] || DOMAIN_SHOWCASE_IDS.movie;
-          const promises = showcaseIds.map((uid) =>
-            api.getUserProfile(uid).catch(() => ({
-              id: uid,
-              name: `User #${uid}`,
-              email: `user${uid}@example.com`,
-              totalRatings: 10,
-              totalLikes: 8,
-              totalDislikes: 2,
-              topGenres: [domain.toUpperCase()]
-            }))
+          setTotal(null);
+        } else if (mode === "showcase") {
+          const results = await Promise.all(
+            meta.showcaseUsers.map((uid) =>
+              api.getUserProfile(uid, domain).catch(
+                (): UserProfile => ({
+                  id: uid,
+                  name: `Người dùng #${uid}`,
+                  email: "",
+                  totalRatings: 0,
+                  totalLikes: 0,
+                  totalDislikes: 0,
+                  topGenres: [],
+                })
+              )
+            )
           );
-          const results = await Promise.all(promises);
-          setUsers(results.filter((u): u is UserProfile => u !== null));
+          if (!cancelled) setUsers(results);
         } else {
-          const res = await api.getUsers(1, 30);
+          const res = await api.getUsers(1, 30, undefined, domain);
+          if (cancelled) return;
           setUsers(res.users || []);
+          setTotal(res.total);
         }
-      } catch (err) {
-        console.error("Failed to load users:", err);
+      } catch (err: any) {
+        if (cancelled) return;
+        setUsers([]);
+        setLoadError(err.message || "Không tải được danh sách người dùng.");
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
-    const timer = setTimeout(fetchUsers, searchQuery ? 250 : 0);
-    return () => clearTimeout(timer);
-  }, [isOpen, searchQuery, filterMode]);
+    const timer = setTimeout(fetchUsers, query ? 250 : 0);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [open, query, mode, domain]);
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    if (open) return;
+    setSearchQuery("");
+    setIsCreating(false);
+    setCreateError(null);
+  }, [open]);
+
+  const choose = (id: number) => {
+    onSelectUser(id);
+    onClose();
+  };
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
+    setCreateError(null);
     try {
-      setCreatingLoading(true);
-      const created = await api.createUser(
-        newName.trim() || undefined,
-        newEmail.trim() || undefined
-      );
-
-      // Reset form
+      setCreating(true);
+      const created = await api.createUser(newName.trim() || undefined, newEmail.trim() || undefined, domain);
       setNewName("");
       setNewEmail("");
-      setIsCreating(false);
-
-      // Select new user and trigger callback
-      onSelectUser(created.id);
-      if (onUserCreated) {
-        onUserCreated(created.id);
-      }
-      onClose();
+      choose(created.id);
     } catch (err: any) {
-      alert(`Không thể tạo người dùng: ${err.message}`);
+      setCreateError(err.message || "Không tạo được người dùng.");
     } finally {
-      setCreatingLoading(false);
+      setCreating(false);
     }
   };
 
+  const showDirectId = numericId !== null && numericId > 0 && !users.some((u) => u.id === numericId);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
-      <div className="relative w-full max-w-2xl bg-[#0F121A] border border-white/15 rounded-3xl p-6 shadow-2xl shadow-black/95 max-h-[90vh] flex flex-col text-white">
-        {/* Modal Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-white/10 shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-primary/10 border border-primary/30 flex items-center justify-center text-primary shadow-glow-amber">
-              <UserCheck className="w-5 h-5" />
-            </div>
+    <Dialog.Root open={open} onOpenChange={(next) => !next && onClose()}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-50 animate-fade-in bg-bg/70 backdrop-blur-sm" />
+        <Dialog.Content
+          aria-describedby={undefined}
+          className="fixed left-1/2 top-[8vh] z-50 flex max-h-[84vh] w-[calc(100vw-2rem)] max-w-xl -translate-x-1/2 animate-fade-in flex-col rounded-2xl border border-line-strong bg-surface shadow-lift focus:outline-none"
+        >
+          <header className="flex items-start justify-between gap-4 px-5 pt-5 sm:px-6">
             <div>
-              <h3 className="text-lg font-bold">Chọn Hồ Sơ Người Dùng (User Profile)</h3>
-              <p className="text-xs text-slate-400 font-mono">
-                Chọn người dùng hoặc tạo User mới để thử nghiệm Cold-Start
+              <Dialog.Title className="font-display text-2xl font-semibold tracking-tight">Chọn người dùng</Dialog.Title>
+              <p className="mt-1 text-sm text-ink-muted">
+                Tập {meta.dataset}. Gợi ý và đồ thị sẽ được tính lại cho hồ sơ bạn chọn.
               </p>
             </div>
-          </div>
+            <Dialog.Close className="icon-btn -mr-2 -mt-1" aria-label="Đóng">
+              <X className="h-5 w-5" strokeWidth={1.75} />
+            </Dialog.Close>
+          </header>
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setIsCreating(!isCreating)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all active:scale-95 shadow-md ${
-                isCreating
-                  ? "bg-slate-800 text-slate-200 border border-white/10"
-                  : "bg-primary text-black hover:bg-primary/90 shadow-glow-amber"
-              }`}
-            >
-              <UserPlus className="w-3.5 h-3.5" />
-              <span>{isCreating ? "Hủy tạo" : "Thêm User mới"}</span>
-            </button>
-
-            <button
-              onClick={onClose}
-              className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-
-        {/* Inline Create User Form */}
-        {isCreating && (
-          <form
-            onSubmit={handleCreateUser}
-            className="my-3 p-4 rounded-2xl bg-gradient-to-r from-primary/10 via-slate-900 to-slate-900 border border-primary/30 space-y-3 animate-in fade-in slide-in-from-top-2 duration-200 shrink-0"
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-primary uppercase tracking-wider font-mono flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>Tạo Người Dùng Mới (Cold-Start)</span>
-              </span>
-              <span className="text-[10px] text-slate-400 font-mono">ID sẽ được cấp tự động</span>
+          <div className="space-y-3 px-5 pb-3 pt-4 sm:px-6">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-ink-faint" strokeWidth={1.75} />
+              <input
+                type="search"
+                autoFocus
+                aria-label="Tìm người dùng theo ID hoặc tên"
+                placeholder="Nhập ID hoặc tên, ví dụ 1665"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="field h-10 pl-9 [&::-webkit-search-cancel-button]:hidden"
+              />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              <div>
-                <label className="block text-[11px] text-slate-300 mb-1">Tên người dùng (Tùy chọn):</label>
-                <input
-                  type="text"
-                  placeholder="Ví dụ: Cinephile Linh..."
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-primary"
-                  autoFocus
-                />
+            {!query && (
+              <div className="flex items-center justify-between gap-3">
+                <div className="seg" role="group" aria-label="Phạm vi danh sách">
+                  <button onClick={() => setMode("showcase")} aria-pressed={mode === "showcase"} className="seg-item">
+                    Hồ sơ mẫu
+                  </button>
+                  <button onClick={() => setMode("all")} aria-pressed={mode === "all"} className="seg-item">
+                    Tất cả
+                  </button>
+                </div>
+                <button
+                  onClick={() => setIsCreating((v) => !v)}
+                  aria-expanded={isCreating}
+                  className="btn btn-quiet h-8 px-2.5"
+                >
+                  <UserPlus className="h-4 w-4" strokeWidth={1.75} />
+                  Người dùng mới
+                </button>
               </div>
-              <div>
-                <label className="block text-[11px] text-slate-300 mb-1">Email (Tùy chọn):</label>
-                <input
-                  type="email"
-                  placeholder="Để trống để tự động tạo..."
-                  value={newEmail}
-                  onChange={(e) => setNewEmail(e.target.value)}
-                  className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-primary"
-                />
-              </div>
-            </div>
+            )}
 
-            <div className="flex items-center justify-end gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => setIsCreating(false)}
-                className="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-xs text-slate-300"
-              >
-                Hủy
-              </button>
-              <button
-                type="submit"
-                disabled={creatingLoading}
-                className="px-4 py-1.5 rounded-xl bg-primary text-black font-bold text-xs hover:brightness-110 active:scale-95 transition-all flex items-center gap-1.5 shadow-glow-amber disabled:opacity-50"
-              >
-                {creatingLoading ? (
-                  <span>Đang khởi tạo...</span>
-                ) : (
-                  <>
-                    <span>Tạo & Đăng nhập</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </>
+            {isCreating && !query && (
+              <form onSubmit={handleCreateUser} className="animate-fade-up rounded-xl border border-line bg-bg p-4">
+                <p className="text-sm text-ink-muted">
+                  Người dùng mới chưa có tương tác nào: đây là cách nhanh nhất để thử kịch bản khởi động lạnh.
+                </p>
+                <div className={cn("mt-3 grid gap-3 sm:grid-cols-2", domain !== "movie" && "hidden")}>
+                  <label className="block text-[13px] text-ink-muted">
+                    Tên (không bắt buộc)
+                    <input
+                      type="text"
+                      value={newName}
+                      onChange={(e) => setNewName(e.target.value)}
+                      placeholder="Trần Khánh Linh"
+                      className="field mt-1"
+                    />
+                  </label>
+                  <label className="block text-[13px] text-ink-muted">
+                    Email (không bắt buộc)
+                    <input
+                      type="email"
+                      value={newEmail}
+                      onChange={(e) => setNewEmail(e.target.value)}
+                      placeholder="Để trống để tự sinh"
+                      className="field mt-1"
+                    />
+                  </label>
+                </div>
+                {createError && (
+                  <p className="mt-3 flex items-start gap-2 text-sm text-neg" role="alert">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.75} />
+                    {createError}
+                  </p>
                 )}
-              </button>
-            </div>
-          </form>
-        )}
-
-        {/* Search & Filter Controls */}
-        <div className="pt-3 pb-2 space-y-2.5 shrink-0">
-          <div className="relative">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              placeholder="Tìm theo User ID (ví dụ: 1, 39, 1665...) hoặc tên..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-slate-900/90 border border-white/10 rounded-xl pl-10 pr-4 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-primary/50 font-mono"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery("")}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-white"
-              >
-                ✕
-              </button>
+                <div className="mt-4 flex justify-end gap-2">
+                  <button type="button" onClick={() => setIsCreating(false)} className="btn btn-quiet">
+                    Huỷ
+                  </button>
+                  <button type="submit" disabled={creating} className="btn btn-primary">
+                    {creating ? "Đang tạo…" : "Tạo và dùng ngay"}
+                    {!creating && <ArrowRight className="h-4 w-4" strokeWidth={2} />}
+                  </button>
+                </div>
+              </form>
             )}
           </div>
 
-          {!searchQuery && (
-            <div className="flex items-center gap-2">
+          <div className="min-h-0 flex-1 overflow-y-auto border-t border-line px-2 py-2 sm:px-3">
+            {showDirectId && (
               <button
-                onClick={() => setFilterMode("showcase")}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                  filterMode === "showcase"
-                    ? "bg-primary text-black font-bold shadow-sm"
-                    : "bg-white/5 text-slate-300 hover:bg-white/10"
-                }`}
+                onClick={() => choose(numericId!)}
+                className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-3 text-left transition-colors duration-200 hover:bg-raised"
               >
-                ⭐ Người dùng tiêu biểu (Showcase)
+                <span>
+                  Dùng trực tiếp ID <span className="num font-medium text-accent">#{numericId}</span>
+                  <span className="block text-[13px] text-ink-faint">ID phải tồn tại trong tập {meta.dataset}.</span>
+                </span>
+                <ArrowRight className="h-4 w-4 text-ink-faint" strokeWidth={1.75} />
               </button>
-              <button
-                onClick={() => setFilterMode("all")}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                  filterMode === "all"
-                    ? "bg-primary text-black font-bold shadow-sm"
-                    : "bg-white/5 text-slate-300 hover:bg-white/10"
-                }`}
-              >
-                📋 Tất cả người dùng (Từ ID 0)
-              </button>
-            </div>
-          )}
-        </div>
+            )}
 
-        {/* User List */}
-        <div className="flex-1 overflow-y-auto space-y-2 pr-1 my-2">
-          {loading ? (
-            <div className="py-16 flex flex-col items-center justify-center text-center">
-              <div className="w-8 h-8 rounded-full border-2 border-primary border-t-transparent animate-spin mb-3" />
-              <p className="text-xs text-slate-400 font-mono">Đang tải danh sách người dùng...</p>
-            </div>
-          ) : users.length === 0 ? (
-            <div className="py-16 text-center text-slate-400">
-              <p className="text-sm font-semibold">Không tìm thấy người dùng phù hợp</p>
-              <p className="text-xs text-slate-500 mt-1 font-mono">Thử tìm kiếm với số ID khác (0 đến 2500)</p>
-            </div>
-          ) : (
-            users.map((u) => {
-              const isSelected = u.id === currentUserId;
-              return (
-                <div
-                  key={u.id}
-                  onClick={() => {
-                    onSelectUser(u.id);
-                    onClose();
-                  }}
-                  className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 group ${
-                    isSelected
-                      ? "bg-primary/10 border-primary shadow-glow-amber"
-                      : "bg-slate-900/60 border-white/5 hover:border-primary/40 hover:bg-slate-800/60"
-                  }`}
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    {/* User Avatar Badge */}
-                    <div
-                      className={`w-11 h-11 rounded-2xl flex items-center justify-center font-mono font-bold text-sm shrink-0 border ${
-                        isSelected
-                          ? "bg-primary text-black border-primary shadow-md"
-                          : "bg-white/5 text-primary border-white/10 group-hover:border-primary/40"
-                      }`}
-                    >
-                      #{u.id}
-                    </div>
+            {loadError && (
+              <div className="notice notice-error m-2" role="alert">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-neg" strokeWidth={1.75} />
+                <p>{loadError}</p>
+              </div>
+            )}
 
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <h4 className="text-sm font-bold text-white group-hover:text-primary transition-colors truncate">
-                          {u.name}
-                        </h4>
-                        {isSelected && (
-                          <span className="px-2 py-0.5 rounded-full bg-primary/20 text-primary border border-primary/30 text-[10px] font-mono font-bold shrink-0 flex items-center gap-1">
-                            <Check className="w-3 h-3" />
-                            Đang chọn
-                          </span>
-                        )}
-                      </div>
+            {loading && users.length === 0 && (
+              <div className="space-y-2 p-2" aria-busy="true">
+                {[0, 1, 2, 3].map((i) => (
+                  <div key={i} className="skeleton h-14" />
+                ))}
+              </div>
+            )}
 
-                      {/* Stats & Genres */}
-                      <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400 mt-1">
-                        <span className="font-mono text-slate-300">
-                          {u.totalRatings} lượt đánh giá
-                        </span>
-                        <span>•</span>
-                        <span className="text-emerald-400 flex items-center gap-0.5 font-mono">
-                          <ThumbsUp className="w-3 h-3" /> {u.totalLikes}
-                        </span>
-                        <span>•</span>
-                        <span className="text-red-400 flex items-center gap-0.5 font-mono">
-                          <ThumbsDown className="w-3 h-3" /> {u.totalDislikes}
-                        </span>
-                      </div>
+            {!loading && !loadError && users.length === 0 && !showDirectId && (
+              <p className="px-3 py-10 text-center text-sm text-ink-muted">
+                Không có người dùng nào khớp với “{query}”. Thử một ID số khác.
+              </p>
+            )}
 
-                      {/* Top genres badges */}
-                      {u.topGenres && u.topGenres.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-1.5">
-                          {u.topGenres.map((g) => (
-                            <span
-                              key={g}
-                              className="px-1.5 py-0.5 rounded bg-white/5 border border-white/5 text-[10px] font-mono text-slate-300"
-                            >
-                              {g}
-                            </span>
-                          ))}
-                        </div>
+            <ul className={cn("transition-opacity duration-200", loading && "opacity-50")}>
+              {users.map((u) => {
+                const isSelected = u.id === currentUserId;
+                return (
+                  <li key={u.id}>
+                    <button
+                      onClick={() => choose(u.id)}
+                      aria-current={isSelected ? "true" : undefined}
+                      className={cn(
+                        "flex w-full items-center gap-3.5 rounded-lg px-3 py-2.5 text-left transition-colors duration-200",
+                        isSelected ? "bg-accent/10" : "hover:bg-raised"
                       )}
-                    </div>
-                  </div>
+                    >
+                      <span
+                        className={cn(
+                          "num flex h-10 min-w-[3.25rem] items-center justify-center rounded-md px-1.5 text-[13px]",
+                          isSelected ? "bg-accent font-medium text-accent-ink" : "bg-raised text-ink-muted"
+                        )}
+                      >
+                        #{u.id}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-medium text-ink">{u.name}</span>
+                        <span className="block truncate text-[13px] text-ink-muted">
+                          <span className="num">{u.totalLikes}</span> thích
+                          {u.totalDislikes > 0 && (
+                            <>
+                              {" · "}
+                              <span className="num">{u.totalDislikes}</span> không thích
+                            </>
+                          )}
+                          {u.topGenres?.length > 0 && ` · ${u.topGenres.slice(0, 3).join(", ")}`}
+                          {(u.sampleLikes?.length ?? 0) > 0 && ` · ${u.sampleLikes!.slice(0, 2).join(", ")}`}
+                        </span>
+                      </span>
+                      {isSelected && <Check className="h-4 w-4 shrink-0 text-accent" strokeWidth={2} />}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
 
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onSelectUser(u.id);
-                      onClose();
-                    }}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 transition-all ${
-                      isSelected
-                        ? "bg-primary text-black font-bold"
-                        : "bg-white/5 text-slate-300 group-hover:bg-primary group-hover:text-black font-medium"
-                    }`}
-                  >
-                    {isSelected ? "Đang chọn" : "Chọn User"}
-                  </button>
-                </div>
-              );
-            })
+          {total !== null && !query && (
+            <footer className="border-t border-line px-5 py-3 text-[13px] text-ink-faint sm:px-6">
+              Đang hiện {users.length} trên <span className="num">{total.toLocaleString("vi-VN")}</span> người dùng. Nhập
+              ID để tới thẳng một hồ sơ.
+            </footer>
           )}
-        </div>
-
-        {/* Modal Footer */}
-        <div className="pt-3 border-t border-white/10 flex items-center justify-between text-xs text-slate-400 shrink-0">
-          <span className="font-mono">Tổng cộng: 2,501 người dùng trong hệ thống</span>
-          <button
-            onClick={onClose}
-            className="px-4 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-200 text-xs font-medium transition-colors"
-          >
-            Đóng
-          </button>
-        </div>
-      </div>
-    </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 };

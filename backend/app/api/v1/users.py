@@ -12,7 +12,9 @@ from app.models.schemas import (
     UserListResponse,
     UserHistoryItemDto,
     UserHistoryResponse,
+    DomainName,
 )
+from app.recommendation.engine import recommendation_engine
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
@@ -63,8 +65,13 @@ def list_users(
     search: Optional[str] = Query(None, description="Search by ID, name or email"),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
+    domain: DomainName = Query("movie", description="Dataset whose users are listed"),
     db: Session = Depends(get_db)
 ):
+    if domain != "movie":
+        total, users = recommendation_engine.list_user_profiles(domain, page, limit, search)
+        return UserListResponse(total=total, page=page, limit=limit, users=users)
+
     query = db.query(User)
 
     if search:
@@ -87,7 +94,15 @@ def list_users(
     )
 
 @router.post("", response_model=UserProfileDto)
-def create_user(dto: Optional[CreateUserDto] = None, db: Session = Depends(get_db)):
+def create_user(
+    dto: Optional[CreateUserDto] = None,
+    domain: DomainName = Query("movie", description="Dataset the new user belongs to"),
+    db: Session = Depends(get_db)
+):
+    if domain != "movie":
+        # User ids are per dataset: a book or music user must not take the next MovieLens id.
+        return recommendation_engine.create_user(domain)
+
     max_id = db.query(func.max(User.id)).scalar() or 0
     new_id = max_id + 1
 
@@ -119,7 +134,17 @@ def create_user(dto: Optional[CreateUserDto] = None, db: Session = Depends(get_d
     return _get_user_stats(user, db)
 
 @router.get("/{userId}", response_model=UserProfileDto)
-def get_user_profile(userId: int, db: Session = Depends(get_db)):
+def get_user_profile(
+    userId: int,
+    domain: DomainName = Query("movie", description="Dataset the user belongs to"),
+    db: Session = Depends(get_db)
+):
+    if domain != "movie":
+        profile = recommendation_engine.get_user_profile(domain, userId)
+        if profile is None:
+            raise HTTPException(status_code=404, detail=f"User {userId} not found in {domain}")
+        return profile
+
     user = db.query(User).filter(User.id == userId).first()
     if not user:
         raise HTTPException(status_code=404, detail=f"User {userId} not found")

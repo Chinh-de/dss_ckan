@@ -5,7 +5,8 @@ from app.models.sql_models import Movie, Recommendation
 from app.models.schemas import (
     RecommendationResponseDto,
     RecommendationItemDto,
-    RecommendationFeedbackDto
+    RecommendationFeedbackDto,
+    DomainName,
 )
 from app.recommendation.engine import recommendation_engine
 
@@ -13,7 +14,7 @@ router = APIRouter(prefix="/recommendations", tags=["Recommendations"])
 
 @router.get("", response_model=RecommendationResponseDto)
 def get_recommendations(
-    domain: str = Query("movie", description="Domain dataset: movie, book, or music"),
+    domain: DomainName = Query("movie", description="Domain dataset: movie, book, or music"),
     userId: int = Query(1, description="User ID"),
     topK: int = Query(12, ge=1, le=50, description="Number of items to recommend"),
     background_tasks: BackgroundTasks = None,

@@ -31,7 +31,11 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const errorBody = await response.json().catch(() => ({}));
-    throw new Error(errorBody.detail || `Request failed with status ${response.status}`);
+    // FastAPI validation errors (422) carry a list of issues rather than a string.
+    const detail = Array.isArray(errorBody.detail)
+      ? errorBody.detail.map((d: any) => d.msg).join("; ")
+      : errorBody.detail;
+    throw new Error(detail || `Request failed with status ${response.status}`);
   }
 
   return response.json();
@@ -173,21 +177,21 @@ export const api = {
   },
 
   // Users & History
-  async getUsers(page: number = 1, limit: number = 20, search?: string): Promise<{ total: number; page: number; limit: number; users: any[] }> {
-    const params = new URLSearchParams({ page: `${page}`, limit: `${limit}` });
+  async getUsers(page: number = 1, limit: number = 20, search?: string, domain: DomainType = "movie"): Promise<{ total: number; page: number; limit: number; users: any[] }> {
+    const params = new URLSearchParams({ page: `${page}`, limit: `${limit}`, domain });
     if (search) params.append("search", search);
     return request(`/users?${params.toString()}`);
   },
 
-  async createUser(name?: string, email?: string): Promise<any> {
-    return request(`/users`, {
+  async createUser(name?: string, email?: string, domain: DomainType = "movie"): Promise<any> {
+    return request(`/users?domain=${domain}`, {
       method: "POST",
       body: JSON.stringify({ name, email }),
     });
   },
 
-  async getUserProfile(userId: number): Promise<any> {
-    return request(`/users/${userId}`);
+  async getUserProfile(userId: number, domain: DomainType = "movie"): Promise<any> {
+    return request(`/users/${userId}?domain=${domain}`);
   },
 
   async getUserHistory(

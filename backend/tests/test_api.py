@@ -47,9 +47,22 @@ class TestMultiDomainRecommendation(unittest.TestCase):
     def test_cold_start_simulation(self):
         recommendation_engine.initialize()
         sim = recommendation_engine.simulate_cold_start("movie", interactions=3)
-        self.assertIsNotNone(sim.currentMetrics)
-        self.assertGreater(sim.currentMetrics.ckan_auc, sim.currentMetrics.cf_auc)
-        self.assertEqual(len(sim.trajectory), 6)
+        # Six training-data ratios, straight from the benchmark notebook.
+        self.assertEqual([p.ratio for p in sim.sparsity], [0.1, 0.2, 0.4, 0.6, 0.8, 1.0])
+        self.assertAlmostEqual(sim.sparsity[0].ckan_auc, 0.9125)
+        self.assertAlmostEqual(sim.sparsity[0].mf_auc, 0.8281)
+        self.assertEqual({m.model for m in sim.models}, {"MostPopular", "MF", "RippleNet", "CKAN"})
+        self.assertEqual(len(sim.seedItems), 3)
+        self.assertEqual(len(sim.ckanRecommendations), 5)
+        self.assertEqual(len(sim.popularRecommendations), 5)
+
+    def test_popular_fallback_is_ranked_by_popularity(self):
+        recommendation_engine.initialize()
+        music = recommendation_engine.get_domain("music")
+        recs = recommendation_engine._popular_fallback(music, music.all_items, top_k=5)
+        counts = [music.popularity[r.id] for r in recs]
+        self.assertEqual(counts, sorted(counts, reverse=True))
+        self.assertEqual(counts[0], max(music.popularity.values()))
 
 if __name__ == "__main__":
     unittest.main()

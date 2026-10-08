@@ -1,21 +1,25 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="vi" class="dark" data-domain="movie">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CineGraph • Explainable Movie Intelligence Platform</title>
-    <!-- Fonts: Plus Jakarta Sans & JetBrains Mono -->
+    <meta name="theme-color" content="#0E0D0C" />
+    <meta
+      name="description"
+      content="Demo hệ gợi ý CKAN trên đồ thị tri thức cho ba miền dữ liệu: phim (MovieLens), sách (Book-Crossing) và âm nhạc (Last.FM), kèm lý giải từng gợi ý."
+    />
+    <title>CKAN · Gợi ý trên đồ thị tri thức</title>
+    <!-- Be Vietnam Pro + Bricolage Grotesque + JetBrains Mono: all ship a Vietnamese subset -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600&family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=JetBrains+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
   </head>
-  <body class="bg-background text-foreground antialiased selection:bg-primary/20 selection:text-primary min-h-screen">
+  <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-
